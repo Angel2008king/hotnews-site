@@ -1,0 +1,36 @@
+name: Build & Publish Daily
+
+on:
+  schedule:
+    - cron: "0 0 * * *"  # 每天 08:00 北京时间（GitHub 使用 UTC）
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Generate static site
+        run: |
+          python cn_hot_news_ranker3.py --html index.html --no-txt --no-docx --outdir .
+
+      - name: Commit & push index.html
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add index.html
+          git commit -m "Update site: $(date -u '+%Y-%m-%d %H:%M:%S') UTC" || echo "No changes"
+          git push
