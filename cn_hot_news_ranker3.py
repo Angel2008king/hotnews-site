@@ -262,23 +262,15 @@ def fmt_pub_time(it:Dict[str,Any])->str:
 def save_to_txt(items:List[Dict[str,Any]], out_fullpath:str):
     now=dt.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
     with open(out_fullpath,'w',encoding='utf-8') as f:
-        f.write('今日中国热点新闻（自动评分排序，已过滤国家领导人及中央政府相关)
-')
-        f.write(f'生成时间：{now}
-')
-        f.write('数据源：中新网(RSS优先)、央视网、新华网、环球网、网易（部分HTML解析）
-')
-        f.write('评分维度：多源交叉/来源权重/关键词/结构/时间新鲜度
-
-')
+        f.write('今日中国热点新闻（自动评分排序，已过滤国家领导人及中央政府相关)')
+        f.write(f'生成时间：{now}')
+        f.write('数据源：中新网(RSS优先)、央视网、新华网、环球网、网易（部分HTML解析）')
+        f.write('评分维度：多源交叉/来源权重/关键词/结构/时间新鲜度')
         for i,it in enumerate(items,1):
             srcs='、'.join(it.get('sources',[])); pub=fmt_pub_time(it)
-            f.write(f"{i:02d}. {it['title']}（来源：{srcs or '未知'}；日期：{pub or '—'}）
-")
-            f.write(f"    摘要：{it.get('summary_final','')}
-")
-            f.write(f"    {it['url']}
-")
+            f.write(f"{i:02d}. {it['title']}（来源：{srcs or '未知'}；日期：{pub or '—'}）")
+            f.write(f"    摘要：{it.get('summary_final','')}")
+            f.write(f"    {it['url']}")
 
 def add_hyperlink(paragraph, text, url):
     r_id=paragraph.part.relate_to(url, RT.HYPERLINK, is_external=True)
