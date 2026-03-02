@@ -364,8 +364,5 @@ if __name__=='__main__':
     except Exception as e:
         log_path=os.path.join(OUTPUT_DIR,'error.log')
         with open(log_path,'a',encoding='utf-8') as f:
-            f.write(f"
-[{dt.datetime.now()}] {e}
-{traceback.format_exc()}
-")
+            f.write(f"[{dt.datetime.now()}] {e}{traceback.format_exc()}")
         print('[异常] 运行出错，已写入日志：', log_path)
