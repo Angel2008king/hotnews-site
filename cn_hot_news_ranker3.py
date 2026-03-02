@@ -316,7 +316,8 @@ def save_to_html(items:List[Dict[str,Any]], out_fullpath:str):
         )
     tail = "</section><footer>本页由定时任务自动生成（RSS/权威站点抓取 + 评分排序）。</footer></div></body></html>"
     with open(out_fullpath,'w',encoding='utf-8') as f:
-        f.write(head + "".join(rows) + tail)
+        f.write(head + "
+".join(rows) + tail)
 
 def main():
     parser=argparse.ArgumentParser(description='CN Hot News Ranker')
@@ -366,3 +367,4 @@ if __name__=='__main__':
         with open(log_path,'a',encoding='utf-8') as f:
             f.write(f"[{dt.datetime.now()}] {e}{traceback.format_exc()}")
         print('[异常] 运行出错，已写入日志：', log_path)
+
