@@ -293,30 +293,59 @@ def save_to_word(items:List[Dict[str,Any]], out_fullpath:str):
         doc.add_paragraph('')
     doc.save(out_fullpath)
 
-def save_to_html(items:List[Dict[str,Any]], out_fullpath:str):
-    now=dt.datetime.now().strftime('%Y-%m-%d %H:%M')
-    css=(":root{--fg:#222;--muted:#666;--link:#0969da;--bg:#fff;--card:#f8f9fa}"          "*{box-sizing:border-box}"          "body{margin:0;padding:24px 16px;color:var(--fg);background:var(--bg);"          "font:16px/1.6 system-ui,-apple-system,Segoe UI,Roboto,Arial,"Microsoft Yahei",sans-serif}"          ".wrap{max-width:860px;margin:0 auto}"          "header h1{margin:0 0 4px 0;font-size:1.6rem}"          "header .ts{color:var(--muted);font-size:.9rem;margin-bottom:16px}"          ".card{background:var(--card);border:1px solid #e5e7eb;border-radius:10px;padding:14px 16px;margin:10px 0}"          ".idx{display:inline-block;width:36px;color:#888}"          ".title a{color:var(--link);text-decoration:none}"          ".title a:hover{text-decoration:underline}"          ".meta{color:var(--muted);font-size:.9rem;margin-top:4px}"          ".sum{margin-top:6px}"          "footer{color:var(--muted);font-size:.85rem;margin-top:28px}")
+def save_to_html(items: List[Dict[str, Any]], out_fullpath: str):
+    now = dt.datetime.now().strftime('%Y-%m-%d %H:%M')
+
+    # 用三引号，避免 "Microsoft Yahei" 的引号冲突
+    css = '''
+:root{--fg:#222;--muted:#666;--link:#0969da;--bg:#fff;--card:#f8f9fa}
+*{box-sizing:border-box}
+body{
+  margin:0;padding:24px 16px;color:var(--fg);background:var(--bg);
+  font:16px/1.6 system-ui,-apple-system,Segoe UI,Roboto,Arial,"Microsoft Yahei",sans-serif
+}
+.wrap{max-width:860px;margin:0 auto}
+header h1{margin:0 0 4px 0;font-size:1.6rem}
+header .ts{color:var(--muted);font-size:.9rem;margin-bottom:16px}
+.card{background:var(--card);border:1px solid #e5e7eb;border-radius:10px;padding:14px 16px;margin:10px 0}
+.idx{display:inline-block;width:36px;color:#888}
+.title a{color:var(--link);text-decoration:none}
+.title a:hover{text-decoration:underline}
+.meta{color:var(--muted);font-size:.9rem;margin-top:4px}
+.sum{margin-top:6px}
+footer{color:var(--muted);font-size:.85rem;margin-top:28px}
+'''.strip()
+
     head = (
         '<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"/>'
         '<meta name="viewport" content="width=device-width,initial-scale=1"/>'
-        '<title>今日中国热点新闻</title><style>'+css+'</style></head><body>'
+        '<title>今日中国热点新闻</title><style>' + css + '</style></head><body>'
         '<div class="wrap"><header><h1>今日中国热点新闻</h1>'
         f'<div class="ts">生成时间：{now}</div></header><section>'
     )
-    rows=[]
-    for i,it in enumerate(items,1):
-        title=htmllib.escape(it['title']); url=htmllib.escape(it['url'])
-        srcs='、'.join(it.get('sources',[])) or '未知'; pub=fmt_pub_time(it) or '—'
-        summary=htmllib.escape(it.get('summary_final','') or it.get('summary','') or it['title'])
+
+    rows = []
+    for i, it in enumerate(items, 1):
+        title = htmllib.escape(it['title'])
+        url = htmllib.escape(it['url'])
+        srcs = '、'.join(it.get('sources', [])) or '未知'
+        pub = fmt_pub_time(it) or '—'
+        summary = htmllib.escape(it.get('summary_final', '') or it.get('summary', '') or it['title'])
+
+        # 用单引号包裹 HTML 属性，避免与外层 f-string 的双引号冲突
         rows.append(
-            f"<article class='card'><div class='title'><span class='idx'>{i:02d}.</span>"
-            f"<a href="{url}" target="_blank" rel="noopener noreferrer">{title}</a></div>"
-            f"<div class='meta'>来源：{htmllib.escape(srcs)}；日期：{htmllib.escape(pub)}</div>"
-            f"<div class='sum'>摘要：{summary}</div></article>"
+            (
+                f"<article class='card'><div class='title'><span class='idx'>{i:02d}.</span>"
+                f"<a href='{url}' target='_blank' rel='noopener noreferrer'>{title}</a></div>"
+                f"<div class='meta'>来源：{htmllib.escape(srcs)}；日期：{htmllib.escape(pub)}</div>"
+                f"<div class='sum'>摘要：{summary}</div></article>"
+            )
         )
+
     tail = "</section><footer>本页由定时任务自动生成（RSS/权威站点抓取 + 评分排序）。</footer></div></body></html>"
-    with open(out_fullpath,'w',encoding='utf-8') as f:
-        f.write(head + "".join(rows) + tail)
+
+    with open(out_fullpath, 'w', encoding='utf-8') as f:
+        f.write(head + "\n".join(rows) + tail)
 
 def main():
     parser=argparse.ArgumentParser(description='CN Hot News Ranker')
