@@ -343,7 +343,7 @@ footer{color:var(--muted);font-size:.85rem;margin-top:28px}
             )
         )
 
-    tail = "</section><footer>本页由定时任务自动生成（RSS/权威站点抓取 + 评分排序）。</footer></div></body></html>"
+    tail = "</section><footer>本页每小时自动刷新一次（Copyright © 2026 Yingfeng Su. All rights reserved.）。</footer></div></body></html>"
 
     with open(out_fullpath, 'w', encoding='utf-8') as f:
         f.write(head + "\n".join(rows) + tail)
