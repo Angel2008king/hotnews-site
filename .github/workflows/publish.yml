@@ -2,7 +2,7 @@ name: Build & Publish Daily
 
 on:
   schedule:
-    - cron: "0 0 * * *"  # 每天 08:00 北京时间（GitHub 使用 UTC）
+    - cron: "0 * * * *"  # 每天 08:00 北京时间（GitHub 使用 UTC）
   workflow_dispatch:
 
 permissions:
