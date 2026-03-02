@@ -33,8 +33,8 @@ HEADERS = {"User-Agent": ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
 TIMEOUT=8; RETRY=2; SLEEP_BETWEEN=0.7
 MAX_ITEMS_PER_SOURCE=3; TOP_N=80
 
-EXCLUDE_KEYWORDS=["习近平","总书记","国家主席","中共中央","中央政治局","中央委员会",
-                  "中央政府","国务院常务会议","中央纪委","中央统战部","国家领导人"]
+EXCLUDE_KEYWORDS=["习近平","总书记","国家主席","中共中央","中央委员会",
+                  "中央政府","中央统战部","国家领导人"]
 EXCLUDE_REGEX=re.compile("|".join(map(re.escape,EXCLUDE_KEYWORDS)),re.IGNORECASE)
 HOT_KEYWORDS={"突发":3,"通报":2,"最新":2,"预警":2,"发布":1,"春运":3,"消费":2,
               "房产":2,"楼市":2,"经济":2,"事故":3,"暴雪":2,"寒潮":2,"高铁":2,
