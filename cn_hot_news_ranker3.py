@@ -8,6 +8,7 @@ Hot News Ranker (CN) — static site generator
 import os, re, time, argparse, html as htmllib
 import datetime as dt
 from datetime import timezone
+CN_TZ = dt.timezone(dt.timedelta(hours=8), name='Asia/Shanghai')
 from typing import List, Dict, Tuple, Optional, Any
 
 import requests
@@ -253,14 +254,14 @@ def rank_items(items:List[Dict[str,Any]])->List[Dict[str,Any]]:
 def fmt_pub_time(it:Dict[str,Any])->str:
     if it.get('published_parsed'):
         try:
-            pub_dt=dt.datetime(*it['published_parsed'][:6],tzinfo=timezone.utc).astimezone()
+            pub_dt=dt.datetime(*it['published_parsed'][:6], tzinfo=timezone.utc).astimezone(CN_TZ)
             return pub_dt.strftime('%Y-%m-%d %H:%M')
         except Exception:
             return it.get('published','')
     return it.get('published','')
 
 def save_to_txt(items:List[Dict[str,Any]], out_fullpath:str):
-    now=dt.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    now = dt.datetime.now(CN_TZ).strftime('%Y-%m-%d %H:%M')
     with open(out_fullpath,'w',encoding='utf-8') as f:
         f.write('今日中国热点新闻（自动评分排序，已过滤国家领导人及中央政府相关)')
         f.write(f'生成时间：{now}')
@@ -294,7 +295,7 @@ def save_to_word(items:List[Dict[str,Any]], out_fullpath:str):
     doc.save(out_fullpath)
 
 def save_to_html(items: List[Dict[str, Any]], out_fullpath: str):
-    now = dt.datetime.now().strftime('%Y-%m-%d %H:%M')
+    now = dt.datetime.now(CN_TZ).strftime('%Y-%m-%d %H:%M')
 
     # 用三引号，避免 "Microsoft Yahei" 的引号冲突
     css = '''
@@ -393,6 +394,5 @@ if __name__=='__main__':
     except Exception as e:
         log_path=os.path.join(OUTPUT_DIR,'error.log')
         with open(log_path,'a',encoding='utf-8') as f:
-            f.write(f"[{dt.datetime.now()}] {e}{traceback.format_exc()}")
+            f.write(f"[{dt.datetime.now(CN_TZ)}] {e}{traceback.format_exc()}")
         print('[异常] 运行出错，已写入日志：', log_path)
-
