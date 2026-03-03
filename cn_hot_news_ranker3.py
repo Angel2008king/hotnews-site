@@ -24,7 +24,7 @@ except Exception:
 # ---------- 常量 & 基础工具 ----------
 CN_TZ = dt.timezone(dt.timedelta(hours=8), name='Asia/Shanghai')
 
-MAX_ITEMS_PER_SOURCE = 5
+MAX_ITEMS_PER_SOURCE = 5        # 按你附件中的配置保留为 5
 TOP_N = 38
 SLEEP_BETWEEN = 0.5
 TIMEOUT = 10
@@ -236,11 +236,20 @@ def parse_xinhua(html: str) -> list:
     items = _extract_by_selectors(soup, selectors, ('https://www.news.cn/',), MAX_ITEMS_PER_SOURCE)
     return items or _parse_generic_links(html, ('https://www.news.cn/',))
 
+# === 修改点 #1：环球网（新增更稳的首选选择器，保留原兜底） ===
 def parse_huanqiu_china(html: str) -> list:
     soup = BeautifulSoup(html, 'lxml')
-    selectors = ['section[class*="list"] a', '.list a', '.item a', '.content a']
-    items = _extract_by_selectors(soup, selectors, ('https://china.huanqiu.com/', 'https://www.huanqiu.com/'), MAX_ITEMS_PER_SOURCE)
-    return items or _parse_generic_links(html, ('https://china.huanqiu.com/','https://www.huanqiu.com/'))
+    selectors = [
+        'a[href*="/article/"]',                 # 新增：PC 聚合页文章链接更稳
+        'section[class*="list"] a', '.list a', '.item a', '.content a'
+    ]
+    items = _extract_by_selectors(
+        soup,
+        selectors,
+        ('https://www.huanqiu.com/', 'https://china.huanqiu.com/'),
+        MAX_ITEMS_PER_SOURCE
+    )
+    return items or _parse_generic_links(html, ('https://www.huanqiu.com/','https://china.huanqiu.com/'))
 
 def parse_net163_domestic(html: str) -> list:
     soup = BeautifulSoup(html, 'lxml')
@@ -248,11 +257,20 @@ def parse_net163_domestic(html: str) -> list:
     items = _extract_by_selectors(soup, selectors, ('https://news.163.com/', 'https://www.163.com/'), MAX_ITEMS_PER_SOURCE)
     return items or _parse_generic_links(html, ('https://news.163.com/','https://www.163.com/'))
 
+# === 修改点 #2：南方都市报 → 南方网·南都列表（更稳直出列表） ===
 def parse_nandu(html: str) -> list:
     soup = BeautifulSoup(html, 'lxml')
-    selectors = ['.news-list a', '.list a', '.focus-news a', 'section a', '.module a']
-    items = _extract_by_selectors(soup, selectors, ('https://www.nandu.com/', 'http://www.nandu.com/', 'https://news.southcn.com/', 'https://m.nfapp.southcn.com/'), MAX_ITEMS_PER_SOURCE)
-    return items or _parse_generic_links(html, ('https://www.nandu.com/','http://www.nandu.com/','https://news.southcn.com/','https://m.nfapp.southcn.com/'))
+    selectors = [
+        '.newslist a',               # 新增：南方网列表页的新闻列表类
+        'section a', '.list a', 'a[href*="/content/"]'
+    ]
+    items = _extract_by_selectors(
+        soup,
+        selectors,
+        ('https://news.southcn.com/', 'https://www.nandu.com/', 'http://www.nandu.com/', 'https://m.nfapp.southcn.com/'),
+        MAX_ITEMS_PER_SOURCE
+    )
+    return items or _parse_generic_links(html, ('https://news.southcn.com/','https://www.nandu.com/','http://www.nandu.com/','https://m.nfapp.southcn.com/'))
 
 def parse_thepaper(html: str) -> list:
     soup = BeautifulSoup(html, 'lxml')
@@ -260,11 +278,20 @@ def parse_thepaper(html: str) -> list:
     items = _extract_by_selectors(soup, selectors, ('https://www.thepaper.cn/', 'https://m.thepaper.cn/'), MAX_ITEMS_PER_SOURCE)
     return items or _parse_generic_links(html, ('https://www.thepaper.cn/','https://m.thepaper.cn/'))
 
+# === 修改点 #3：财经网 → PC 金融频道（新增首选选择器，保留回退） ===
 def parse_caijing(html: str) -> list:
     soup = BeautifulSoup(html, 'lxml')
-    selectors = ['.news-list a', '.article-list a', '.list a', 'section a']
-    items = _extract_by_selectors(soup, selectors, ('https://www.caijing.com.cn/', 'https://m.caijing.com.cn/', 'https://finance.caijing.com.cn/', 'https://magazine.caijing.com.cn/'), MAX_ITEMS_PER_SOURCE)
-    return items or _parse_generic_links(html, ('https://www.caijing.com.cn/','https://m.caijing.com.cn/','https://finance.caijing.com.cn/','https://magazine.caijing.com.cn/'))
+    selectors = [
+        'a[href^="https://finance.caijing.com.cn/"]',   # 新增：限定金融频道域名优先
+        '.news-list a', '.article-list a', '.list a', 'section a'
+    ]
+    items = _extract_by_selectors(
+        soup,
+        selectors,
+        ('https://www.caijing.com.cn/', 'https://m.caijing.com.cn/', 'https://finance.caijing.com.cn/', 'https://magazine.caijing.com.cn/'),
+        MAX_ITEMS_PER_SOURCE
+    )
+    return items or _parse_generic_links(html, ('https://finance.caijing.com.cn/','https://www.caijing.com.cn/','https://m.caijing.com.cn/','https://magazine.caijing.com.cn/'))
 
 def parse_ifeng(html: str) -> list:
     soup = BeautifulSoup(html, 'lxml')
@@ -483,7 +510,7 @@ footer{color:var(--muted);font-size:.85rem;margin-top:28px}
     with open(out_fullpath, 'w', encoding='utf-8') as f:
         f.write(head + "\n".join(rows) + tail)
 
-# 数据源
+# 数据源（仅替换了 3 家的 html 入口；其它保持不变）
 SOURCES: List[Tuple[str, Dict[str, str]]] = [
     ("中新网-即时", {"rss": "https://www.chinanews.com.cn/rss/scroll-news.xml"}),
     ("中新网-要闻", {"rss": "https://www.chinanews.com.cn/rss/importnews.xml"}),
@@ -493,12 +520,20 @@ SOURCES: List[Tuple[str, Dict[str, str]]] = [
     ("央视网-新闻频道", {"html": "https://news.cctv.cn/", "parser": "parse_cctv_index"}),
     ("央视网-国内新闻", {"html": "https://news.cctv.com/china/", "parser": "parse_cctv_china"}),
     ("新华网-首页", {"html": "https://www.news.cn/", "parser": "parse_xinhua"}),
-    ("环球网-国内", {"html": "https://china.huanqiu.com/", "parser": "parse_huanqiu_china"}),
+
+    # 修改：环球网-国内 -> PC 聚合页
+    ("环球网-国内", {"html": "https://www.huanqiu.com/", "parser": "parse_huanqiu_china"}),
+
     ("网易新闻-国内", {"html": "https://news.163.com/domestic/", "parser": "parse_net163_domestic"}),
 
     ("澎湃新闻", {"rss": "https://feedx.net/rss/thepaper.xml", "html": "https://www.thepaper.cn/news", "parser": "parse_thepaper"}),
-    ("南方都市报", {"html": "https://www.nandu.com/", "parser": "parse_nandu"}),
-    ("财经网", {"html": "https://m.caijing.com.cn/category/23", "parser": "parse_caijing"}),
+
+    # 修改：南方都市报 -> 南方网·南都列表
+    ("南方都市报", {"html": "https://news.southcn.com/node_17a07e5926/?cms_node_post_list_page=1", "parser": "parse_nandu"}),
+
+    # 修改：财经网 -> PC 金融频道
+    ("财经网", {"html": "https://finance.caijing.com.cn/", "parser": "parse_caijing"}),
+
     ("凤凰网", {"html": "https://news.ifeng.com/", "parser": "parse_ifeng"}),
     ("搜狐新闻", {"rss": "https://rss.news.sohu.com/rss/guonei.xml", "html": "https://news.sohu.com/", "parser": "parse_sohu_news"}),
 ]
