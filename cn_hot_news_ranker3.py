@@ -3,14 +3,16 @@
 """
 CN Hot News Ranker (one-file version)
 文件名：cn_hot_news_ranker3.py
-- 单文件整合：无需 v5，兼容旧命令行参数（--no-txt / --no-docx）
+- 单文件整合：兼容旧命令行参数（--no-txt / --no-docx）
 - TOP_N=38；标题下新增「天气预报 / 豆包」链接
 - 站点精准选择器 + 回退；摘要提取；稳健网络；评分排序
+- 新增：从正文页抽取“权威发布时间”；可选过滤旧稿（默认：丢弃两年前及更早）
 """
 
-import os, re, time, argparse, html as htmllib
+import os, re, time, argparse, html as htmllib, json
 import datetime as dt
 from datetime import timezone
+from email.utils import parsedate_to_datetime
 from typing import List, Dict, Tuple, Optional, Any
 
 # 依赖
@@ -24,7 +26,7 @@ except Exception:
 # ---------- 常量 & 基础工具 ----------
 CN_TZ = dt.timezone(dt.timedelta(hours=8), name='Asia/Shanghai')
 
-MAX_ITEMS_PER_SOURCE = 5        # 按你附件中的配置保留为 5
+MAX_ITEMS_PER_SOURCE = 5
 TOP_N = 38
 SLEEP_BETWEEN = 0.5
 TIMEOUT = 10
@@ -236,7 +238,7 @@ def parse_xinhua(html: str) -> list:
     items = _extract_by_selectors(soup, selectors, ('https://www.news.cn/',), MAX_ITEMS_PER_SOURCE)
     return items or _parse_generic_links(html, ('https://www.news.cn/',))
 
-# === 修改点 #1：环球网（新增更稳的首选选择器，保留原兜底） ===
+# 环球网（新增更稳的首选选择器，保留原兜底）
 def parse_huanqiu_china(html: str) -> list:
     soup = BeautifulSoup(html, 'lxml')
     selectors = [
@@ -257,11 +259,11 @@ def parse_net163_domestic(html: str) -> list:
     items = _extract_by_selectors(soup, selectors, ('https://news.163.com/', 'https://www.163.com/'), MAX_ITEMS_PER_SOURCE)
     return items or _parse_generic_links(html, ('https://news.163.com/','https://www.163.com/'))
 
-# === 修改点 #2：南方都市报 → 南方网·南都列表（更稳直出列表） ===
+# 南方都市报 → 南方网·南都列表
 def parse_nandu(html: str) -> list:
     soup = BeautifulSoup(html, 'lxml')
     selectors = [
-        '.newslist a',               # 新增：南方网列表页的新闻列表类
+        '.newslist a',               # 南方网列表页的新闻列表类
         'section a', '.list a', 'a[href*="/content/"]'
     ]
     items = _extract_by_selectors(
@@ -278,11 +280,11 @@ def parse_thepaper(html: str) -> list:
     items = _extract_by_selectors(soup, selectors, ('https://www.thepaper.cn/', 'https://m.thepaper.cn/'), MAX_ITEMS_PER_SOURCE)
     return items or _parse_generic_links(html, ('https://www.thepaper.cn/','https://m.thepaper.cn/'))
 
-# === 修改点 #3：财经网 → PC 金融频道（新增首选选择器，保留回退） ===
+# 财经网 → PC 金融频道（新增首选选择器，保留回退）
 def parse_caijing(html: str) -> list:
     soup = BeautifulSoup(html, 'lxml')
     selectors = [
-        'a[href^="https://finance.caijing.com.cn/"]',   # 新增：限定金融频道域名优先
+        'a[href^="https://finance.caijing.com.cn/"]',   # 优先限定金融频道域名
         '.news-list a', '.article-list a', '.list a', 'section a'
     ]
     items = _extract_by_selectors(
@@ -381,28 +383,189 @@ def dedup_and_group(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         })
     return merged
 
-def fetch_page_summary(url: str) -> str:
+# ===== 新增：从正文或 URL 抽取发布时间 =====
+def extract_publish_time(html: str, url: str) -> Tuple[Optional[str], Optional[time.struct_time]]:
+    """
+    从 HTML 和 URL 中尽可能抽取“权威发布时间”。返回 (published_text, published_parsed)
+    """
+    soup = BeautifulSoup(html, 'lxml')
+
+    # 1) 常见 meta 位
+    META_CANDIDATES = [
+        ('meta', {'property': 'article:published_time'}, 'content'),
+        ('meta', {'name': 'publishdate'}, 'content'),
+        ('meta', {'name': 'PubDate'}, 'content'),
+        ('meta', {'itemprop': 'datePublished'}, 'content'),
+        ('meta', {'name': 'date'}, 'content'),
+        ('meta', {'name': 'DC.date.issued'}, 'content'),
+    ]
+    for tag_name, attrs, attr_key in META_CANDIDATES:
+        tag = soup.find(tag_name, attrs=attrs)
+        if tag and tag.get(attr_key):
+            s = tag[attr_key]
+            dt_obj = None
+            try:
+                # 优先 RFC / ISO
+                if re.search(r'\d{4}', s):
+                    try:
+                        dt_obj = parsedate_to_datetime(s)
+                    except Exception:
+                        dt_obj = dt.datetime.fromisoformat(s)
+            except Exception:
+                dt_obj = None
+            if not dt_obj:
+                m = re.search(r'(\d{4})[-/](\d{1,2})[-/](\d{1,2})', s)
+                if m:
+                    try:
+                        dt_obj = dt.datetime(int(m.group(1)), int(m.group(2)), int(m.group(3)))
+                    except Exception:
+                        dt_obj = None
+            if dt_obj:
+                return (dt_obj.strftime('%Y-%m-%d %H:%M'), dt_obj.timetuple())
+
+    # 2) JSON-LD 里找 datePublished
+    for node in soup.select('script[type="application/ld+json"]'):
+        try:
+            data = json.loads(node.get_text(strip=True))
+            nodes = data if isinstance(data, list) else [data]
+            for obj in nodes:
+                if isinstance(obj, dict) and 'datePublished' in obj:
+                    s = str(obj['datePublished'])
+                    dt_obj = None
+                    try:
+                        if re.search(r'\d{4}', s):
+                            try:
+                                dt_obj = parsedate_to_datetime(s)
+                            except Exception:
+                                dt_obj = dt.datetime.fromisoformat(s)
+                    except Exception:
+                        dt_obj = None
+                    if not dt_obj:
+                        m = re.search(r'(\d{4})[-/](\d{1,2})[-/](\d{1,2})', s)
+                        if m:
+                            try:
+                                dt_obj = dt.datetime(int(m.group(1)), int(m.group(2)), int(m.group(3)))
+                            except Exception:
+                                dt_obj = None
+                    if dt_obj:
+                        return (dt_obj.strftime('%Y-%m-%d %H:%M'), dt_obj.timetuple())
+        except Exception:
+            pass
+
+    # 3) <time datetime="...">
+    t = soup.find('time')
+    if t:
+        cand = t.get('datetime') or t.get_text(strip=True)
+        if cand:
+            dt_obj = None
+            try:
+                if re.search(r'\d{4}', cand):
+                    try:
+                        dt_obj = parsedate_to_datetime(cand)
+                    except Exception:
+                        dt_obj = dt.datetime.fromisoformat(cand)
+            except Exception:
+                dt_obj = None
+            if not dt_obj:
+                m = re.search(r'(\d{4})[-/](\d{1,2})[-/](\d{1,2})', cand)
+                if m:
+                    try:
+                        dt_obj = dt.datetime(int(m.group(1)), int(m.group(2)), int(m.group(3)))
+                    except Exception:
+                        dt_obj = None
+            if dt_obj:
+                return (dt_obj.strftime('%Y-%m-%d %H:%M'), dt_obj.timetuple())
+
+    # 4) URL 里推断 yyyy-mm-dd 或 yyyy/mm/dd 或 yyyymmdd
+    m = (re.search(r'(\d{4})[-/](\d{1,2})[-/](\d{1,2})', url)
+         or re.search(r'(\d{4})(\d{2})(\d{2})', url))
+    if m:
+        try:
+            y, mth, dday = int(m.group(1)), int(m.group(2)), int(m.group(3))
+            dt_obj = dt.datetime(y, mth, dday)
+            return (dt_obj.strftime('%Y-%m-%d %H:%M'), dt_obj.timetuple())
+        except Exception:
+            pass
+
+    return (None, None)
+
+def fetch_page_summary_and_time(url: str) -> Tuple[str, Optional[str], Optional[time.struct_time]]:
+    """
+    读取正文页，同时返回（摘要、published_text、published_parsed）
+    """
+    summary = ''
+    published_text, published_parsed = (None, None)
     try:
         html = get_html(url)
+
+        # 先抽时间（权威位）
+        published_text, published_parsed = extract_publish_time(html, url)
+
+        # 再抽摘要
         soup = BeautifulSoup(html, 'lxml')
         for sel in ['meta[name="description"]','meta[name="Description"]','meta[property="og:description"]','meta[name="og:description"]']:
             tag = soup.select_one(sel)
             if tag and tag.get('content'):
-                return strip_html(tag['content'])[:400]
-        for p in soup.select('article p, .content p, .article p, .main p, p'):
-            text = normalize_space(p.get_text())
-            if len(text) >= 30:
-                return text[:400]
+                summary = strip_html(tag['content'])[:400]
+                break
+        if not summary:
+            for p in soup.select('article p, .content p, .article p, .main p, p'):
+                text = normalize_space(p.get_text())
+                if len(text) >= 30:
+                    summary = text[:400]
+                    break
     except Exception:
         pass
-    return ''
+    return (summary, published_text, published_parsed)
 
 def attach_summaries(items: List[Dict[str, Any]]) -> None:
+    """
+    补齐摘要与时间；并过滤过旧稿（默认：两年前及更早的稿件丢弃）。
+    如需保留旧稿，可把“过滤”改为在 score_item 中降权。
+    """
+    now_year = dt.datetime.now(CN_TZ).year
+    keep_items = []
+
     for it in items:
-        s = strip_html(it.get('summary', ''))
-        if not s:
-            s = fetch_page_summary(it['url'])
+        # 先用已有字段
+        s = strip_html(it.get('summary', '')) if it.get('summary') else ''
+        pub_txt = it.get('published', '')
+        pub_parsed = it.get('published_parsed')
+
+        # 不足则从正文页补
+        if not s or not pub_parsed:
+            summary2, pub_txt2, pub_parsed2 = fetch_page_summary_and_time(it['url'])
+            if not s and summary2:
+                s = summary2
+            if not pub_parsed and pub_parsed2:
+                pub_parsed = pub_parsed2
+                pub_txt = pub_txt2 or pub_txt
+
         it['summary_final'] = smart_trim(s or it['title'], 160)
+        if pub_txt:
+            it['published'] = pub_txt
+        if pub_parsed:
+            it['published_parsed'] = pub_parsed
+
+        # ——过滤过旧稿：两年前及更早（可按需调整或改为降权）
+        y = None
+        if it.get('published_parsed'):
+            try:
+                y = dt.datetime(*it['published_parsed'][:3]).year
+            except Exception:
+                y = None
+        if y is None:
+            m = re.search(r'(\d{4})', it.get('url',''))
+            y = int(m.group(1)) if m else None
+
+        if y and y < now_year - 2:
+            # 跳过旧稿（如 2017 年）
+            continue
+
+        keep_items.append(it)
+
+    items.clear()
+    items.extend(keep_items)
 
 def score_item(it: Dict[str, Any]) -> float:
     score = 0.0
@@ -457,7 +620,11 @@ body{
   font:16px/1.6 system-ui,-apple-system,Segoe UI,Roboto,Arial,"Microsoft Yahei",sans-serif
 }
 .wrap{max-width:880px;margin:0 auto}
-header h1{margin:0 0 4px 0;font-size:1.6rem}
+header h1{
+  margin:0 0 4px 0;
+  font-size:1.6rem;
+  text-align:center;   /* 新增：标题置中 */
+}
 header .ts{color:var(--muted);font-size:.9rem;margin-bottom:6px}
 nav.quicklinks{margin:4px 0 12px 0;font-size:.95rem}
 nav.quicklinks a{color:#0969da;text-decoration:none;margin-right:10px}
@@ -510,7 +677,7 @@ footer{color:var(--muted);font-size:.85rem;margin-top:28px}
     with open(out_fullpath, 'w', encoding='utf-8') as f:
         f.write(head + "\n".join(rows) + tail)
 
-# 数据源（仅替换了 3 家的 html 入口；其它保持不变）
+# 数据源（三家入口已换为更稳的 URL）
 SOURCES: List[Tuple[str, Dict[str, str]]] = [
     ("中新网-即时", {"rss": "https://www.chinanews.com.cn/rss/scroll-news.xml"}),
     ("中新网-要闻", {"rss": "https://www.chinanews.com.cn/rss/importnews.xml"}),
@@ -561,14 +728,7 @@ def main():
     print('=== 中国热点新闻评分模型（HTML 版，精准选择器）启动 ===')
     print('输出目录：', outdir)
     if _session.proxies:
-        print('代理已启用：', _session.proxies)
-
-    raw: List[Dict[str, Any]] = []
-    failed_sources: List[str] = []
-
-    for name, conf in SOURCES:
-        time.sleep(SLEEP_BETWEEN)
-        print(f'[抓取] {name} ... ', end='')
+       end='')
         data = fetch_from_source(name, conf)
         if not data:
             failed_sources.append(name)
@@ -580,7 +740,7 @@ def main():
 
     print(f'[汇总] 原始合计 {len(raw)} 条；去重合并 …')
     merged = dedup_and_group(raw)
-    print('[摘要] 生成摘要 …')
+    print('[摘要] 生成摘要 + 补齐时间 …')
     attach_summaries(merged)
     print(f'[评分] 排序 …')
     ranked = rank_items(merged)
