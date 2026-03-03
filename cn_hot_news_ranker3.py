@@ -448,9 +448,9 @@ footer{color:var(--muted);font-size:.85rem;margin-top:28px}
         '<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"/>'
         '<meta name="viewport" content="width=device-width,initial-scale=1"/>'
         '<meta http-equiv="refresh" content="3600">'
-        '<meta name="description" content="今日中国热点新闻（自动评分排序，汇聚多家权威媒体来源，定时更新）。" />'
-        '<title>今日中国热点新闻</title><style>' + css + '</style></head><body>'
-        '<div class="wrap"><header><h1>今日中国热点新闻</h1>'
+        '<meta name="description" content="今日热点新闻（自动评分排序，汇聚多家权威媒体来源，定时更新）。" />'
+        '<title>今日热点新闻</title><style>' + css + '</style></head><body>'
+        '<div class="wrap"><header><h1>今日热点新闻</h1>'
         '<nav class="quicklinks">'
         '<a href="https://wap.weather.com.cn/mweather/" target="_blank" rel="noopener noreferrer">天气预报</a>'
         ' · '
@@ -476,7 +476,7 @@ footer{color:var(--muted);font-size:.85rem;margin-top:28px}
         )
 
     tail = (
-        "</section><footer>本页每小时自动刷新一次；仅做信息聚合与索引，内容以源站为准。"
+        "</section><footer>本站每小时自动刷新一次；仅做信息聚合与索引，内容以源站为准。"
         " Copyright © 2026 Yingfeng Su. All rights reserved.</footer></div></body></html>"
     )
 
