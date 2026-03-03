@@ -728,7 +728,7 @@ def main():
     print('=== 中国热点新闻评分模型（HTML 版，精准选择器）启动 ===')
     print('输出目录：', outdir)
     if _session.proxies:
-       end='')
+    print('代理已启用：', _session.proxies)
         data = fetch_from_source(name, conf)
         if not data:
             failed_sources.append(name)
