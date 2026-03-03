@@ -1,0 +1,32 @@
+name: Cleanup old workflow runs (keep last 10)
+
+on:
+  schedule:
+    # 每天 03:30（UTC）执行；广州时区为每天 11:30
+    - cron: '30 3 * * *'
+  workflow_dispatch: {}
+
+permissions:
+  actions: write
+  contents: read
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Delete old workflow runs (keep last 10)
+        uses: Mattraks/delete-workflow-runs@v2
+        with:
+          token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          retain_days: 3650        # 用很大的天数，避免“按天数”误删
+          keep_minimum_runs: 10    # 核心：至少保留 10 条
+
+          # ——可选过滤：只清理特定工作流（名称/文件名，多个用 | 分隔）——
+          # delete_workflow_pattern: 'Build & Publish Daily|pages build and deployment'
+
+          # ——可选过滤：只删某些结论（success,cancelled,failure,skipped 等）——
+          # delete_run_by_conclusion_pattern: 'success,cancelled'
+
+          # ——演习模式（仅打印将要删除的内容，不真正删除）——
+          # dry_run: true
