@@ -452,7 +452,7 @@ footer{color:var(--muted);font-size:.85rem;margin-top:28px}
         '<title>今日中国热点新闻</title><style>' + css + '</style></head><body>'
         '<div class="wrap"><header><h1>今日中国热点新闻</h1>'
         '<nav class="quicklinks">'
-        '<a href="https://www.weather.com.cn/forecast/" target="_blank" rel="noopener noreferrer">天气预报</a>'
+        '<a href="https://wap.weather.com.cn/mweather/" target="_blank" rel="noopener noreferrer">天气预报</a>'
         ' · '
         '<a href="https://www.doubao.com/" target="_blank" rel="noopener noreferrer">豆包</a>'
         '</nav>'
