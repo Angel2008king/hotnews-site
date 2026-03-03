@@ -6,7 +6,7 @@ CN Hot News Ranker (one-file version)
 - 单文件整合：兼容旧命令行参数（--no-txt / --no-docx）
 - 顶部“便捷小链接”卡片（天气预报/豆包/城市地铁/网址之家/百度），标题置于其下且居中
 - 站点精准选择器 + 回退；摘要提取；稳健网络；评分排序
-- 从正文页抽取“权威发布时间”（新增网易/新华专用位）；可选过滤旧稿（默认：丢弃两年前及更早）
+- 从正文页抽取“权威发布时间”（含网易/新华专用位）；可选过滤旧稿（默认：丢弃两年前及更早）
 """
 
 import os, re, time, argparse, html as htmllib, json
@@ -380,13 +380,26 @@ def dedup_and_group(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         })
     return merged
 
-# ===== 规范化时间字符串 -> datetime（不假定UTC） =====
+# ===== 规范化时间字符串 -> datetime（本地时区 CN_TZ；修复正则分组） =====
 def _parse_datetime_str(s: str) -> Optional[dt.datetime]:
     s = normalize_space(s)
-    # 常见形式：YYYY-MM-DD HH:MM(:SS) 或 YYYY/MM/DD HH:MM(:SS)
-    m = re.search(r'(\d{4})[-/](\d{1,2})[-/](\d{1,2})\s+(\d{1,2}):(\d{2})(?::(\d{2}))?', s)
+    # 1) 2026-03-03 23:06(:ss) 或 2026/03/03 23:06(:ss)
+    m = re.search(r'(\d{4})[-/\.](\d{1,2})[-/\.](\d{1,2})(?:\s+(\d{1,2}):(\d{2})(?::(\d{2}))?)?', s)
     if m:
-        y, mo, d, hh, mm = int(m.group(1)), int(m.group(2)), int(m.group(3)), int(m.group(4)), int(m.group(5))
+        y, mo, d = int(m.group(1)), int(m.group(2)), int(m.group(3))
+        hh = int(m.group(4)) if m.group(4) else 0
+        mm = int(m.group(5)) if m.group(5) else 0
+        ss = int(m.group(6)) if m.group(6) else 0
+        try:
+            return dt.datetime(y, mo, d, hh, mm, ss, tzinfo=CN_TZ)
+        except Exception:
+            return None
+    # 2) 2026年3月3日 23:06(:ss)
+    m = re.search(r'(\d{4})年(\d{1,2})月(\d{1,2})日(?:\s*(\d{1,2})[:：](\d{2})(?::(\d{2}))?)?', s)
+    if m:
+        y, mo, d = int(m.group(1)), int(m.group(2)), int(m.group(3))
+        hh = int(m.group(4)) if m.group(4) else 0
+        mm = int(m.group(5)) if m.group(5) else 0
         ss = int(m.group(6)) if m.group(6) else 0
         try:
             return dt.datetime(y, mo, d, hh, mm, ss, tzinfo=CN_TZ)
@@ -394,12 +407,29 @@ def _parse_datetime_str(s: str) -> Optional[dt.datetime]:
             return None
     return None
 
+def _try_iso_or_rfc(s: str) -> Optional[dt.datetime]:
+    """尝试解析 ISO/RFC；无时区则按 CN_TZ"""
+    s = normalize_space(s)
+    try:
+        d = parsedate_to_datetime(s)
+        if d and not d.tzinfo:
+            d = d.replace(tzinfo=CN_TZ)
+        return d
+    except Exception:
+        pass
+    try:
+        d = dt.datetime.fromisoformat(s.replace('Z', '+00:00'))
+        if d and not d.tzinfo:
+            d = d.replace(tzinfo=CN_TZ)
+        return d
+    except Exception:
+        return None
+
 # ===== 从正文或 URL 抽取发布时间（增强：网易/新华 专用位） =====
 def extract_publish_time(html: str, url: str) -> Tuple[Optional[str], Optional[time.struct_time]]:
     soup = BeautifulSoup(html, 'lxml')
 
     # --- 0) 站点特定：新华网 ---
-    # 常见：meta[name="pubdate"], meta[name="publishdate"], #pubtime, .header-info .time
     xw_meta = soup.find('meta', attrs={'name': 'pubdate'}) or soup.find('meta', attrs={'name': 'publishdate'})
     if xw_meta and xw_meta.get('content'):
         dt_obj = _parse_datetime_str(xw_meta['content']) or _try_iso_or_rfc(xw_meta['content'])
@@ -412,7 +442,6 @@ def extract_publish_time(html: str, url: str) -> Tuple[Optional[str], Optional[t
             return (dt_obj.strftime('%Y-%m-%d %H:%M'), dt_obj.timetuple())
 
     # --- 1) 站点特定：网易 news.163.com ---
-    # 典型位：#ptime、.post_time_source、.post_info、meta[name="ptime"]
     if 'news.163.com' in url or 'www.163.com' in url:
         ptime = soup.select_one('#ptime') or soup.select_one('.post_time_source') or soup.select_one('.post_info')
         if ptime:
@@ -440,7 +469,6 @@ def extract_publish_time(html: str, url: str) -> Tuple[Optional[str], Optional[t
             content = tag[attr_key]
             dt_obj = _parse_datetime_str(content) or _try_iso_or_rfc(content)
             if not dt_obj:
-                # 兼容 yyyymmdd
                 m = re.search(r'(\d{4})(\d{2})(\d{2})', content)
                 if m:
                     try:
@@ -471,7 +499,7 @@ def extract_publish_time(html: str, url: str) -> Tuple[Optional[str], Optional[t
         except Exception:
             pass
 
-    # --- 4) <time datetime="..."> 或 <time>文本 ---
+    # --- 4) <time> ---
     t = soup.find('time')
     if t:
         cand = t.get('datetime') or t.get_text(strip=True)
@@ -487,7 +515,7 @@ def extract_publish_time(html: str, url: str) -> Tuple[Optional[str], Optional[t
             if dt_obj:
                 return (dt_obj.strftime('%Y-%m-%d %H:%M'), dt_obj.timetuple())
 
-    # --- 5) 页面纯文本中的“发布时间|时间|日期|发布于” 行兜底 ---
+    # --- 5) 页面纯文本中的“发布时间|发布于|时间|日期” 兜底 ---
     body_text = soup.get_text(separator=' ', strip=True)
     m = re.search(r'(发布时间|发布于|时间|日期)\s*[：:]\s*(\d{4}[-/]\d{1,2}[-/]\d{1,2}\s+\d{1,2}:\d{2}(?::\d{2})?)', body_text)
     if m:
@@ -495,7 +523,7 @@ def extract_publish_time(html: str, url: str) -> Tuple[Optional[str], Optional[t
         if dt_obj:
             return (dt_obj.strftime('%Y-%m-%d %H:%M'), dt_obj.timetuple())
 
-    # --- 6) URL 里推断 yyyy-mm-dd / yyyy/mm/dd / yyyymmdd ---
+    # --- 6) URL 里推断日期 ---
     m = (re.search(r'(\d{4})[-/](\d{1,2})[-/](\d{1,2})', url)
          or re.search(r'(\d{4})(\d{2})(\d{2})', url))
     if m:
@@ -507,25 +535,6 @@ def extract_publish_time(html: str, url: str) -> Tuple[Optional[str], Optional[t
             pass
 
     return (None, None)
-
-def _try_iso_or_rfc(s: str) -> Optional[dt.datetime]:
-    """尝试解析 ISO/RFC（若包含时区则保留；缺省则视为本地 CN_TZ）"""
-    s = normalize_space(s)
-    try:
-        # RFC 格式
-        d = parsedate_to_datetime(s)
-        if d and not d.tzinfo:
-            d = d.replace(tzinfo=CN_TZ)
-        return d
-    except Exception:
-        pass
-    try:
-        d = dt.datetime.fromisoformat(s.replace('Z', '+00:00'))
-        if d and not d.tzinfo:
-            d = d.replace(tzinfo=CN_TZ)
-        return d
-    except Exception:
-        return None
 
 def fetch_page_summary_and_time(url: str) -> Tuple[str, Optional[str], Optional[time.struct_time]]:
     summary = ''
@@ -631,7 +640,7 @@ def fmt_pub_time(it: Dict[str, Any]) -> str:
         try:
             pub_dt = dt.datetime(*it['published_parsed'][:6])
             if not pub_dt.tzinfo:
-                pub_dt = pub_dt.replace(tzinfo=timezone.utc)
+                pub_dt = pub_dt.replace(tzinfo=CN_TZ)
             pub_dt = pub_dt.astimezone(CN_TZ)
             return pub_dt.strftime('%Y-%m-%d %H:%M')
         except Exception:
@@ -691,7 +700,7 @@ footer{color:var(--muted);font-size:.85rem;margin-top:28px}
         '<title>今日热点新闻</title><style>' + css + '</style></head><body>'
         '<div class="wrap"><header>'
 
-        # ① 顶部“便捷小链接”卡片
+        # ① 顶部“便捷小链接”卡片（修正为标准 <a>）
         '<div class="card quickcard">'
         '<div class="quickcard-title">便捷小链接</div>'
         '<nav class="quicklinks">'
