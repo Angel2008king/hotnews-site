@@ -4,9 +4,9 @@
 CN Hot News Ranker (one-file version)
 文件名：cn_hot_news_ranker3.py
 - 单文件整合：兼容旧命令行参数（--no-txt / --no-docx）
-- TOP_N=38；“天气预报 / 豆包”置顶为卡片；标题置于其下且居中
+- 顶部“便捷小链接”卡片（天气预报/豆包/城市地铁/网址之家/百度），标题置于其下且居中
 - 站点精准选择器 + 回退；摘要提取；稳健网络；评分排序
-- 新增：从正文页抽取“权威发布时间”；可选过滤旧稿（默认：丢弃两年前及更早）
+- 从正文页抽取“权威发布时间”；可选过滤旧稿（默认：丢弃两年前及更早）
 """
 
 import os, re, time, argparse, html as htmllib, json
@@ -242,7 +242,7 @@ def parse_xinhua(html: str) -> list:
 def parse_huanqiu_china(html: str) -> list:
     soup = BeautifulSoup(html, 'lxml')
     selectors = [
-        'a[href*="/article/"]',                 # PC 聚合页文章链接更稳
+        'a[href*="/article/"]',
         'section[class*="list"] a', '.list a', '.item a', '.content a'
     ]
     items = _extract_by_selectors(
@@ -347,8 +347,8 @@ def is_excluded(title: str, summary: str = '') -> bool:
 
 def dedup_and_group(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     def canon_title(t: str) -> str:
-        t = re.sub(r"[（(【\[][^）)】\]]{1,30}[）)】\]]", "", t)     # 去括号内副标题
-        t = re.sub(r"^\s*(快讯|速览|重磅|独家)\s*[|｜]\s*", "", t)  # 去前缀标识
+        t = re.sub(r"[（(【\[][^）)】\]]{1,30}[）)】\]]", "", t)
+        t = re.sub(r"^\s*(快讯|速览|重磅|独家)\s*[|｜]\s*", "", t)
         return normalize_space(t)
 
     buckets: Dict[str, Dict[str, Any]] = {}
@@ -365,7 +365,7 @@ def dedup_and_group(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
             b['sources'].add(it.get('source', ''))
             b['via'].add(it.get('via', ''))
             if ('news.' in it['url'] or '/202' in it['url']) and 'video' not in it['url']:
-                b['url'] = it['url']  # 更“像新闻”的链接优先
+                b['url'] = it['url']
             if it.get('published_parsed') and not b.get('published_parsed'):
                 b['published_parsed'] = it['published_parsed']
                 b['published'] = it.get('published', '')
@@ -597,17 +597,33 @@ body{
   font:16px/1.6 system-ui,-apple-system,Segoe UI,Roboto,Arial,"Microsoft Yahei",sans-serif
 }
 .wrap{max-width:880px;margin:0 auto}
-.card{background:var(--card);border:1px solid #e5e7eb;border-radius:10px;padding:14px 16px;margin:10px 0}
+
+/* 共用卡片外观 */
+.card{background:var(--card);border:1px solid #e5e7eb;border-radius:14px;padding:14px 16px;margin:10px 0}
+
+/* 顶部“便捷小链接”卡片 */
+.quickcard{position:relative;border:2px solid #334155;background:#f3f4f6}
+.quickcard-title{
+  position:absolute; top:-14px; left:50%; transform:translateX(-50%);
+  background:#fff; padding:4px 12px; border:1px solid #cbd5e1; border-radius:6px;
+  font-size:.95rem; color:#111827; box-shadow:0 1px 1px rgba(0,0,0,.04)
+}
+nav.quicklinks{
+  display:flex; gap:28px; justify-content:space-around; align-items:center; flex-wrap:wrap;
+  min-height:36px; padding:6px 4px;
+}
+nav.quicklinks a{color:#0b66d6;text-decoration:none}
+nav.quicklinks a:hover{text-decoration:underline}
+
+/* 页面标题 */
 header h1{
-  margin:6px 0 4px 0;
+  margin:8px 0 6px 0;
   font-size:1.6rem;
-  text-align:center; /* 标题置中 */
+  text-align:center;
 }
 header .ts{color:var(--muted);font-size:.9rem;margin-bottom:6px}
-nav.quicklinks{display:flex;gap:14px;justify-content:center;flex-wrap:wrap}
-nav.quicklinks a{color:#0969da;text-decoration:none}
-nav.quicklinks a:hover{text-decoration:underline}
-.quickcard{padding:10px 14px}            /* 顶部入口使用卡片外观 */
+
+/* 新闻卡片与内容 */
 .idx{display:inline-block;width:36px;color:#888}
 .title a{color:var(--link);text-decoration:none}
 .title a:hover{text-decoration:underline}
@@ -624,16 +640,19 @@ footer{color:var(--muted);font-size:.85rem;margin-top:28px}
         '<title>今日热点新闻</title><style>' + css + '</style></head><body>'
         '<div class="wrap"><header>'
 
-        # ① 置顶：把“天气预报 / 豆包”放入卡片中（与新闻卡片风格一致）
+        # ① 顶部“便捷小链接”卡片（与新闻卡片一致外观）
         '<div class="card quickcard">'
+        '<div class="quickcard-title">便捷小链接</div>'
         '<nav class="quicklinks">'
         '<a href="https://wap.weather.com.cn/mweather/" target="_blank" rel="noopener noreferrer">天气预报</a>'
-        ' · '
         '<a href="https://www.doubao.com/" target="_blank" rel="noopener noreferrer">豆包</a>'
+        '<a href="https://www.ip138.com/ditie/" target="_blank" rel="noopener noreferrer">城市地铁</a>'
+        '<a href="https://m.hao268.com/" target="_blank" rel="noopener noreferrer">网址之家</a>'
+        '<a href="https://wap.baidu.com/" target="_blank" rel="noopener noreferrer">百度</a>'
         '</nav>'
         '</div>'
 
-        # ② 标题置于“快速入口卡片”的下一行，居中显示
+        # ② 标题放在卡片下方
         '<h1>今日热点新闻</h1>'
 
         f'<div class="ts">生成时间：{now}</div></header><section>'
