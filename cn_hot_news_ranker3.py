@@ -242,7 +242,7 @@ def parse_xinhua(html: str) -> list:
 def parse_huanqiu_china(html: str) -> list:
     soup = BeautifulSoup(html, 'lxml')
     selectors = [
-        'a[href*="/article/"]',                 # 新增：PC 聚合页文章链接更稳
+        'a[href*="/article/"]',                 # PC 聚合页文章链接更稳
         'section[class*="list"] a', '.list a', '.item a', '.content a'
     ]
     items = _extract_by_selectors(
@@ -263,7 +263,7 @@ def parse_net163_domestic(html: str) -> list:
 def parse_nandu(html: str) -> list:
     soup = BeautifulSoup(html, 'lxml')
     selectors = [
-        '.newslist a',               # 南方网列表页的新闻列表类
+        '.newslist a',
         'section a', '.list a', 'a[href*="/content/"]'
     ]
     items = _extract_by_selectors(
@@ -284,7 +284,7 @@ def parse_thepaper(html: str) -> list:
 def parse_caijing(html: str) -> list:
     soup = BeautifulSoup(html, 'lxml')
     selectors = [
-        'a[href^="https://finance.caijing.com.cn/"]',   # 优先限定金融频道域名
+        'a[href^="https://finance.caijing.com.cn/"]',
         '.news-list a', '.article-list a', '.list a', 'section a'
     ]
     items = _extract_by_selectors(
@@ -347,8 +347,10 @@ def is_excluded(title: str, summary: str = '') -> bool:
 
 def dedup_and_group(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     def canon_title(t: str) -> str:
-        t = re.sub(r"[（(【\[][^）)】\]]{1,30}[）)】\]]", "", t)     # 去括号内副标题
-        t = re.sub(r"^\s*(快讯|速览|重磅|独家)\s*[|｜]\s*", "", t)  # 去前缀标识
+        # 去掉括号内副标题/来源等噪声
+        t = re.sub(r"[（(【\[][^）)】\]]{1,30}[）)】\]]", "", t)
+        # 去掉“快讯|速览|重磅|独家|”等前缀
+        t = re.sub(r"^\s*(快讯|速览|重磅|独家)\s*[|｜]\s*", "", t)
         return normalize_space(t)
 
     buckets: Dict[str, Dict[str, Any]] = {}
@@ -383,7 +385,7 @@ def dedup_and_group(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         })
     return merged
 
-# ===== 新增：从正文或 URL 抽取发布时间 =====
+# ===== 从正文或 URL 抽取发布时间 =====
 def extract_publish_time(html: str, url: str) -> Tuple[Optional[str], Optional[time.struct_time]]:
     """
     从 HTML 和 URL 中尽可能抽取“权威发布时间”。返回 (published_text, published_parsed)
@@ -405,7 +407,6 @@ def extract_publish_time(html: str, url: str) -> Tuple[Optional[str], Optional[t
             s = tag[attr_key]
             dt_obj = None
             try:
-                # 优先 RFC / ISO
                 if re.search(r'\d{4}', s):
                     try:
                         dt_obj = parsedate_to_datetime(s)
@@ -623,7 +624,7 @@ body{
 header h1{
   margin:0 0 4px 0;
   font-size:1.6rem;
-  text-align:center;   /* 新增：标题置中 */
+  text-align:center; /* 标题置中 */
 }
 header .ts{color:var(--muted);font-size:.9rem;margin-bottom:6px}
 nav.quicklinks{margin:4px 0 12px 0;font-size:.95rem}
@@ -688,17 +689,17 @@ SOURCES: List[Tuple[str, Dict[str, str]]] = [
     ("央视网-国内新闻", {"html": "https://news.cctv.com/china/", "parser": "parse_cctv_china"}),
     ("新华网-首页", {"html": "https://www.news.cn/", "parser": "parse_xinhua"}),
 
-    # 修改：环球网-国内 -> PC 聚合页
+    # 环球网-国内 -> PC 聚合页
     ("环球网-国内", {"html": "https://www.huanqiu.com/", "parser": "parse_huanqiu_china"}),
 
     ("网易新闻-国内", {"html": "https://news.163.com/domestic/", "parser": "parse_net163_domestic"}),
 
     ("澎湃新闻", {"rss": "https://feedx.net/rss/thepaper.xml", "html": "https://www.thepaper.cn/news", "parser": "parse_thepaper"}),
 
-    # 修改：南方都市报 -> 南方网·南都列表
+    # 南方都市报 -> 南方网·南都列表
     ("南方都市报", {"html": "https://news.southcn.com/node_17a07e5926/?cms_node_post_list_page=1", "parser": "parse_nandu"}),
 
-    # 修改：财经网 -> PC 金融频道
+    # 财经网 -> PC 金融频道
     ("财经网", {"html": "https://finance.caijing.com.cn/", "parser": "parse_caijing"}),
 
     ("凤凰网", {"html": "https://news.ifeng.com/", "parser": "parse_ifeng"}),
@@ -729,6 +730,13 @@ def main():
     print('输出目录：', outdir)
     if _session.proxies:
         print('代理已启用：', _session.proxies)
+
+    raw: List[Dict[str, Any]] = []
+    failed_sources: List[str] = []
+
+    for name, conf in SOURCES:
+        time.sleep(SLEEP_BETWEEN)
+        print(f'[抓取] {name} ... ', end='')
         data = fetch_from_source(name, conf)
         if not data:
             failed_sources.append(name)
