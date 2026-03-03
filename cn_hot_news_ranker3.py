@@ -6,7 +6,7 @@ CN Hot News Ranker (one-file version)
 - 单文件整合：兼容旧命令行参数（--no-txt / --no-docx）
 - 顶部“便捷小链接”卡片（天气预报/豆包/城市地铁/网址之家/百度），标题置于其下且居中
 - 站点精准选择器 + 回退；摘要提取；稳健网络；评分排序
-- 从正文页抽取“权威发布时间”（含网易/新华专用位）；统一以北京时间渲染；可选过滤旧稿（默认：丢弃两年前及更早）
+- 从正文页抽取“权威发布时间”，统一以北京时间渲染；可选过滤旧稿（默认：丢弃两年前及更早）
 """
 
 import os, re, time, argparse, html as htmllib, json
@@ -24,7 +24,7 @@ except Exception:
     feedparser = None
 
 # ---------- 常量 & 基础工具 ----------
-CN_TZ = dt.timezone(dt.timedelta(hours=8), name='Asia/Shanghai')   # 统一采用北京时间
+CN_TZ = dt.timezone(dt.timedelta(hours=8), name='Asia/Shanghai')   # 统一北京时间
 
 MAX_ITEMS_PER_SOURCE = 5
 TOP_N = 38
@@ -168,7 +168,7 @@ def fetch_rss(feed_url: str, source_name: str) -> List[Dict[str, Any]]:
         if not title or not link:
             continue
         summary = strip_html(getattr(e, 'summary', ''))
-        # 直接保留 feed 提供的 published/published_parsed；渲染时统一转为北京时间
+        # RSS 的 published_parsed 默认视为 UTC；最终渲染时统一转为北京时间
         published = normalize_space(getattr(e, 'published', '')) or normalize_space(getattr(e, 'updated', ''))
         pub_parsed = getattr(e, 'published_parsed', None) or getattr(e, 'updated_parsed', None)
         items.append({
@@ -239,6 +239,7 @@ def parse_xinhua(html: str) -> list:
     items = _extract_by_selectors(soup, selectors, ('https://www.news.cn/',), MAX_ITEMS_PER_SOURCE)
     return items or _parse_generic_links(html, ('https://www.news.cn/',))
 
+# 环球网
 def parse_huanqiu_china(html: str) -> list:
     soup = BeautifulSoup(html, 'lxml')
     selectors = [
@@ -258,6 +259,7 @@ def parse_net163_domestic(html: str) -> list:
     items = _extract_by_selectors(soup, selectors, ('https://news.163.com/', 'https://www.163.com/'), MAX_ITEMS_PER_SOURCE)
     return items or _parse_generic_links(html, ('https://news.163.com/','https://www.163.com/'))
 
+# 南方都市报 → 南方网·南都列表
 def parse_nandu(html: str) -> list:
     soup = BeautifulSoup(html, 'lxml')
     selectors = [
@@ -277,6 +279,7 @@ def parse_thepaper(html: str) -> list:
     items = _extract_by_selectors(soup, selectors, ('https://www.thepaper.cn/', 'https://m.thepaper.cn/'), MAX_ITEMS_PER_SOURCE)
     return items or _parse_generic_links(html, ('https://www.thepaper.cn/','https://m.thepaper.cn/'))
 
+# 财经网
 def parse_caijing(html: str) -> list:
     soup = BeautifulSoup(html, 'lxml')
     selectors = [
@@ -342,8 +345,8 @@ def is_excluded(title: str, summary: str = '') -> bool:
 
 def dedup_and_group(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     def canon_title(t: str) -> str:
-        t = re.sub(r"[（(【\[][^）)】\]]{1,30}[）)】\]]", "", t)
-        t = re.sub(r"^\s*(快讯|速览|重磅|独家)\s*[|｜]\s*", "", t)
+        t = re.sub(r"[（(【\[][^）)】\]]{1,30}[）)】\]]", "", t)  # 去括号内副标题
+        t = re.sub(r"^\s*(快讯|速览|重磅|独家)\s*[|｜]\s*", "", t)  # 去前缀标识
         return normalize_space(t)
 
     buckets: Dict[str, Dict[str, Any]] = {}
@@ -360,7 +363,7 @@ def dedup_and_group(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
             b['sources'].add(it.get('source', ''))
             b['via'].add(it.get('via', ''))
             if ('news.' in it['url'] or '/202' in it['url']) and 'video' not in it['url']:
-                b['url'] = it['url']
+                b['url'] = it['url']  # 更像“新闻”的链接优先
             if it.get('published_parsed') and not b.get('published_parsed'):
                 b['published_parsed'] = it['published_parsed']
                 b['published'] = it.get('published', '')
@@ -378,50 +381,45 @@ def dedup_and_group(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         })
     return merged
 
-# ===== 规范化时间字符串 -> datetime（统一视为北京时间，若无时区；若带时区则换算到北京时间） =====
+# ===== 规范化时间字符串 -> datetime（无时区→北京时间；有时区→换算到北京时间） =====
 def _parse_datetime_str(s: str) -> Optional[dt.datetime]:
     s = normalize_space(s)
     # 1) 2026-03-03 23:06(:ss) 或 2026/03/03 23:06(:ss)
     m = re.search(r'(\d{4})[-/](\d{1,2})[-/](\d{1,2})(?:\s+(\d{1,2}):(\d{2})(?::(\d{2}))?)?', s)
     if m:
         y, mo, d = int(m.group(1)), int(m.group(2)), int(m.group(3))
-        hh = int(m.group(4) or 0)
-        mm = int(m.group(5) or 0)
-        ss = int(m.group(6) or 0)
+        hh = int(m.group(4) or 0); mm = int(m.group(5) or 0); ss = int(m.group(6) or 0)
         try:
-            return dt.datetime(y, mo, d, hh, mm, ss, tzinfo=CN_TZ)  # ← 无时区：直接按北京时间
+            return dt.datetime(y, mo, d, hh, mm, ss, tzinfo=CN_TZ)  # 按北京时间
         except Exception:
             return None
     # 2) 2026年3月3日 23:06(:ss)
     m = re.search(r'(\d{4})年(\d{1,2})月(\d{1,2})日(?:\s*(\d{1,2}):(\d{2})(?::(\d{2}))?)?', s)
     if m:
         y, mo, d = int(m.group(1)), int(m.group(2)), int(m.group(3))
-        hh = int(m.group(4) or 0)
-        mm = int(m.group(5) or 0)
-        ss = int(m.group(6) or 0)
+        hh = int(m.group(4) or 0); mm = int(m.group(5) or 0); ss = int(m.group(6) or 0)
         try:
-            return dt.datetime(y, mo, d, hh, mm, ss, tzinfo=CN_TZ)  # ← 按北京时间
+            return dt.datetime(y, mo, d, hh, mm, ss, tzinfo=CN_TZ)
         except Exception:
             return None
     return None
 
 def _try_iso_or_rfc(s: str) -> Optional[dt.datetime]:
-    """尝试解析 ISO/RFC；若字符串未含时区 → 当作北京时间；若含时区 → 换算到北京时间"""
+    """尝试解析 ISO/RFC；无时区→北京时间；有时区→换算到北京时间"""
     s = normalize_space(s)
     # RFC
     try:
         d = parsedate_to_datetime(s)
         if d is not None:
             if d.tzinfo is None:
-                d = d.replace(tzinfo=CN_TZ)      # ← 无时区：北京时间
+                d = d.replace(tzinfo=CN_TZ)
             else:
-                d = d.astimezone(CN_TZ)          # ← 有时区：换算到北京时间
+                d = d.astimezone(CN_TZ)
             return d
     except Exception:
         pass
     # ISO
     try:
-        # 标准化 Z
         d = dt.datetime.fromisoformat(s.replace('Z', '+00:00'))
         if d.tzinfo is None:
             d = d.replace(tzinfo=CN_TZ)
@@ -431,11 +429,11 @@ def _try_iso_or_rfc(s: str) -> Optional[dt.datetime]:
     except Exception:
         return None
 
-# ===== 从正文或 URL 抽取发布时间（增强：网易/新华 专用位；最终一律按北京时间返回） =====
+# ===== 从正文或 URL 抽取发布时间（含网易/新华专用位；最终一律以北京时间返回） =====
 def extract_publish_time(html: str, url: str) -> Tuple[Optional[str], Optional[time.struct_time]]:
     soup = BeautifulSoup(html, 'lxml')
 
-    # --- 0) 站点特定：新华网 ---
+    # --- 站点特定：新华网 ---
     xw_meta = soup.find('meta', attrs={'name': 'pubdate'}) or soup.find('meta', attrs={'name': 'publishdate'})
     if xw_meta and xw_meta.get('content'):
         d = _parse_datetime_str(xw_meta['content']) or _try_iso_or_rfc(xw_meta['content'])
@@ -447,7 +445,7 @@ def extract_publish_time(html: str, url: str) -> Tuple[Optional[str], Optional[t
         if d:
             return (d.strftime('%Y-%m-%d %H:%M'), d.timetuple())
 
-    # --- 1) 站点特定：网易 news.163.com ---
+    # --- 站点特定：网易 news.163.com ---
     if 'news.163.com' in url or 'www.163.com' in url:
         ptime = soup.select_one('#ptime') or soup.select_one('.post_time_source') or soup.select_one('.post_info')
         if ptime:
@@ -460,7 +458,7 @@ def extract_publish_time(html: str, url: str) -> Tuple[Optional[str], Optional[t
             if d:
                 return (d.strftime('%Y-%m-%d %H:%M'), d.timetuple())
 
-    # --- 2) 通用 meta 位 ---
+    # --- 通用 meta 位 ---
     META_CANDIDATES = [
         ('meta', {'property': 'article:published_time'}, 'content'),
         ('meta', {'name': 'publishdate'}, 'content'),
@@ -484,7 +482,7 @@ def extract_publish_time(html: str, url: str) -> Tuple[Optional[str], Optional[t
             if d:
                 return (d.strftime('%Y-%m-%d %H:%M'), d.timetuple())
 
-    # --- 3) JSON-LD {datePublished} ---
+    # --- JSON-LD {datePublished} ---
     for node in soup.select('script[type="application/ld+json"]'):
         try:
             data = json.loads(node.get_text(strip=True))
@@ -505,7 +503,7 @@ def extract_publish_time(html: str, url: str) -> Tuple[Optional[str], Optional[t
         except Exception:
             pass
 
-    # --- 4) <time> ---
+    # --- <time> ---
     t = soup.find('time')
     if t:
         cand = t.get('datetime') or t.get_text(strip=True)
@@ -521,7 +519,7 @@ def extract_publish_time(html: str, url: str) -> Tuple[Optional[str], Optional[t
             if d:
                 return (d.strftime('%Y-%m-%d %H:%M'), d.timetuple())
 
-    # --- 5) 页面纯文本中的“发布时间|发布于|时间|日期” 兜底 ---
+    # --- 文本兜底：“发布时间|发布于|时间|日期：YYYY-MM-DD HH:MM(:SS)” ---
     body_text = soup.get_text(separator=' ', strip=True)
     m = re.search(r'(发布时间|发布于|时间|日期)\s*[：:]\s*(\d{4}[-/]\d{1,2}[-/]\d{1,2}\s+\d{1,2}:\d{2}(?::\d{2})?)', body_text)
     if m:
@@ -529,15 +527,12 @@ def extract_publish_time(html: str, url: str) -> Tuple[Optional[str], Optional[t
         if d:
             return (d.strftime('%Y-%m-%d %H:%M'), d.timetuple())
 
-    # --- 6) URL 里推断日期（只取日期，不造时分秒） ---
+    # --- URL 推断日期（仅日期，不造时分秒） ---
     m = (re.search(r'(\d{4})[-/](\d{1,2})[-/](\d{1,2})', url)
          or re.search(r'(\d{4})(\d{2})(\d{2})', url))
     if m:
         try:
-            if len(m.groups()) == 3:
-                y, mo, d = int(m.group(1)), int(m.group(2)), int(m.group(3))
-            else:
-                y, mo, d = int(m.group(1)), int(m.group(2)), int(m.group(3))
+            y, mo, d = int(m.group(1)), int(m.group(2)), int(m.group(3))
             dtt = dt.datetime(y, mo, d, tzinfo=CN_TZ)
             return (dtt.strftime('%Y-%m-%d %H:%M'), dtt.timetuple())
         except Exception:
@@ -590,6 +585,7 @@ def attach_summaries(items: List[Dict[str, Any]]) -> None:
         if pub_parsed:
             it['published_parsed'] = pub_parsed
 
+        # ——过滤过旧稿：两年前及更早
         y = None
         if it.get('published_parsed'):
             try:
@@ -633,7 +629,7 @@ def score_item(it: Dict[str, Any]) -> float:
     if pp:
         try:
             pub_dt = dt.datetime(*pp[:6])
-            # —— 关键：无 tz 则视为北京时间；有 tz 则转为北京时间
+            # 统一：无 tz → 北京时间；有 tz → 转北京时间
             if not pub_dt.tzinfo:
                 pub_dt = pub_dt.replace(tzinfo=CN_TZ)
             else:
@@ -653,9 +649,9 @@ def fmt_pub_time(it: Dict[str, Any]) -> str:
         try:
             pub_dt = dt.datetime(*it['published_parsed'][:6])
             if not pub_dt.tzinfo:
-                pub_dt = pub_dt.replace(tzinfo=CN_TZ)  # ← 直接按北京时间理解
+                pub_dt = pub_dt.replace(tzinfo=CN_TZ)
             else:
-                pub_dt = pub_dt.astimezone(CN_TZ)      # ← 有时区：换算到北京时间
+                pub_dt = pub_dt.astimezone(CN_TZ)
             return pub_dt.strftime('%Y-%m-%d %H:%M')
         except Exception:
             return it.get('published', '')
@@ -718,11 +714,11 @@ footer{color:var(--muted);font-size:.85rem;margin-top:28px}
         '<div class="card quickcard">'
         '<div class="quickcard-title">便捷小链接</div>'
         '<nav class="quicklinks">'
-        'https://wap.weather.com.cn/mweather/天气预报</a>'
-        'https://www.doubao.com/豆包</a>'
-        'https://www.ip138.com/ditie/城市地铁</a>'
-        'https://m.hao268.com/网址之家</a>'
-        'https://wap.baidu.com/百度</a>'
+        '<a href="https://wap.weather.com.cn/mweather/" target="_blank" rel="noopener noreferrer">天气预报</a>'
+        '<a href="https://www.doubao.com/" target="_blank" rel="noopener noreferrer">豆包</a>'
+        '<a href="https://www.ip138.com/ditie/" target="_blank" rel="noopener noreferrer">城市地铁</a>'
+        '<a href="https://m.hao268.com/" target="_blank" rel="noopener noreferrer">网址之家</a>'
+        '<a href="https://wap.baidu.com/" target="_blank" rel="noopener noreferrer">百度</a>'
         '</nav>'
         '</div>'
 
@@ -742,7 +738,7 @@ footer{color:var(--muted);font-size:.85rem;margin-top:28px}
         rows.append(
             (
                 f"<article class='card'><div class='title'><span class='idx'>{i:02d}.</span>"
-                f"{url}{title}</a></div>"
+                f"<a href='{url}' target='_blank' rel='noopener noreferrer'>{title}</a></div>"
                 f"<div class='meta'>来源：{htmllib.escape(srcs)}；日期：{htmllib.escape(pub)}</div>"
                 f"<div class='sum'>摘要：{summary}</div></article>"
             )
@@ -756,7 +752,7 @@ footer{color:var(--muted);font-size:.85rem;margin-top:28px}
     with open(out_fullpath, 'w', encoding='utf-8') as f:
         f.write(head + "\n".join(rows) + tail)
 
-# 数据源（含三家更稳入口）
+# 数据源（含三家更稳入口；搜狐 RSS 修正为完整 https 链接 + 半角引号）
 SOURCES: List[Tuple[str, Dict[str, str]]] = [
     ("中新网-即时", {"rss": "https://www.chinanews.com.cn/rss/scroll-news.xml"}),
     ("中新网-要闻", {"rss": "https://www.chinanews.com.cn/rss/importnews.xml"}),
@@ -778,6 +774,7 @@ SOURCES: List[Tuple[str, Dict[str, str]]] = [
     ("财经网", {"html": "https://finance.caijing.com.cn/", "parser": "parse_caijing"}),
 
     ("凤凰网", {"html": "https://news.ifeng.com/", "parser": "parse_ifeng"}),
+
     ("搜狐新闻", {"rss": "https://rss.news.sohu.com/rss/guonei.xml", "html": "https://news.sohu.com/", "parser": "parse_sohu_news"}),
 ]
 
