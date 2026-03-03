@@ -778,7 +778,7 @@ SOURCES: List[Tuple[str, Dict[str, str]]] = [
     ("财经网", {"html": "https://finance.caijing.com.cn/", "parser": "parse_caijing"}),
 
     ("凤凰网", {"html": "https://news.ifeng.com/", "parser": "parse_ifeng"}),
-    ("搜狐新闻", {"rss":com/rss/guonei.xml", "html": "https://news.sohu.com/", "parser": "parse_sohu_news"}),
+    ("搜狐新闻", {"rss": "https://rss.news.sohu.com/rss/guonei.xml", "html": "https://news.sohu.com/", "parser": "parse_sohu_news"}),
 ]
 
 # ---------- CLI 主流程（含兼容参数） ----------
