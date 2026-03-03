@@ -24,7 +24,7 @@ except Exception:
 # ---------- 常量 & 基础工具 ----------
 CN_TZ = dt.timezone(dt.timedelta(hours=8), name='Asia/Shanghai')
 
-MAX_ITEMS_PER_SOURCE = 3
+MAX_ITEMS_PER_SOURCE = 5
 TOP_N = 38
 SLEEP_BETWEEN = 0.5
 TIMEOUT = 10
