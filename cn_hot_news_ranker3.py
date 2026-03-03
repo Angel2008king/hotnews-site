@@ -4,7 +4,7 @@
 CN Hot News Ranker (one-file version)
 文件名：cn_hot_news_ranker3.py
 - 单文件整合：兼容旧命令行参数（--no-txt / --no-docx）
-- TOP_N=38；标题下新增「天气预报 / 豆包」链接
+- TOP_N=38；“天气预报 / 豆包”置顶为卡片；标题置于其下且居中
 - 站点精准选择器 + 回退；摘要提取；稳健网络；评分排序
 - 新增：从正文页抽取“权威发布时间”；可选过滤旧稿（默认：丢弃两年前及更早）
 """
@@ -347,10 +347,8 @@ def is_excluded(title: str, summary: str = '') -> bool:
 
 def dedup_and_group(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     def canon_title(t: str) -> str:
-        # 去掉括号内副标题/来源等噪声
-        t = re.sub(r"[（(【\[][^）)】\]]{1,30}[）)】\]]", "", t)
-        # 去掉“快讯|速览|重磅|独家|”等前缀
-        t = re.sub(r"^\s*(快讯|速览|重磅|独家)\s*[|｜]\s*", "", t)
+        t = re.sub(r"[（(【\[][^）)】\]]{1,30}[）)】\]]", "", t)     # 去括号内副标题
+        t = re.sub(r"^\s*(快讯|速览|重磅|独家)\s*[|｜]\s*", "", t)  # 去前缀标识
         return normalize_space(t)
 
     buckets: Dict[str, Dict[str, Any]] = {}
@@ -387,12 +385,8 @@ def dedup_and_group(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
 
 # ===== 从正文或 URL 抽取发布时间 =====
 def extract_publish_time(html: str, url: str) -> Tuple[Optional[str], Optional[time.struct_time]]:
-    """
-    从 HTML 和 URL 中尽可能抽取“权威发布时间”。返回 (published_text, published_parsed)
-    """
     soup = BeautifulSoup(html, 'lxml')
 
-    # 1) 常见 meta 位
     META_CANDIDATES = [
         ('meta', {'property': 'article:published_time'}, 'content'),
         ('meta', {'name': 'publishdate'}, 'content'),
@@ -415,7 +409,7 @@ def extract_publish_time(html: str, url: str) -> Tuple[Optional[str], Optional[t
             except Exception:
                 dt_obj = None
             if not dt_obj:
-                m = re.search(r'(\d{4})[-/](\d{1,2})[-/](\d{1,2})', s)
+                m = re.search(r'(\d{4})\d{1,2}\d{1,2}', s)
                 if m:
                     try:
                         dt_obj = dt.datetime(int(m.group(1)), int(m.group(2)), int(m.group(3)))
@@ -424,7 +418,6 @@ def extract_publish_time(html: str, url: str) -> Tuple[Optional[str], Optional[t
             if dt_obj:
                 return (dt_obj.strftime('%Y-%m-%d %H:%M'), dt_obj.timetuple())
 
-    # 2) JSON-LD 里找 datePublished
     for node in soup.select('script[type="application/ld+json"]'):
         try:
             data = json.loads(node.get_text(strip=True))
@@ -442,7 +435,7 @@ def extract_publish_time(html: str, url: str) -> Tuple[Optional[str], Optional[t
                     except Exception:
                         dt_obj = None
                     if not dt_obj:
-                        m = re.search(r'(\d{4})[-/](\d{1,2})[-/](\d{1,2})', s)
+                        m = re.search(r'(\d{4})\d{1,2}\d{1,2}', s)
                         if m:
                             try:
                                 dt_obj = dt.datetime(int(m.group(1)), int(m.group(2)), int(m.group(3)))
@@ -453,7 +446,6 @@ def extract_publish_time(html: str, url: str) -> Tuple[Optional[str], Optional[t
         except Exception:
             pass
 
-    # 3) <time datetime="...">
     t = soup.find('time')
     if t:
         cand = t.get('datetime') or t.get_text(strip=True)
@@ -468,7 +460,7 @@ def extract_publish_time(html: str, url: str) -> Tuple[Optional[str], Optional[t
             except Exception:
                 dt_obj = None
             if not dt_obj:
-                m = re.search(r'(\d{4})[-/](\d{1,2})[-/](\d{1,2})', cand)
+                m = re.search(r'(\d{4})\d{1,2}\d{1,2}', cand)
                 if m:
                     try:
                         dt_obj = dt.datetime(int(m.group(1)), int(m.group(2)), int(m.group(3)))
@@ -477,8 +469,7 @@ def extract_publish_time(html: str, url: str) -> Tuple[Optional[str], Optional[t
             if dt_obj:
                 return (dt_obj.strftime('%Y-%m-%d %H:%M'), dt_obj.timetuple())
 
-    # 4) URL 里推断 yyyy-mm-dd 或 yyyy/mm/dd 或 yyyymmdd
-    m = (re.search(r'(\d{4})[-/](\d{1,2})[-/](\d{1,2})', url)
+    m = (re.search(r'(\d{4})\d{1,2}\d{1,2}', url)
          or re.search(r'(\d{4})(\d{2})(\d{2})', url))
     if m:
         try:
@@ -491,18 +482,11 @@ def extract_publish_time(html: str, url: str) -> Tuple[Optional[str], Optional[t
     return (None, None)
 
 def fetch_page_summary_and_time(url: str) -> Tuple[str, Optional[str], Optional[time.struct_time]]:
-    """
-    读取正文页，同时返回（摘要、published_text、published_parsed）
-    """
     summary = ''
     published_text, published_parsed = (None, None)
     try:
         html = get_html(url)
-
-        # 先抽时间（权威位）
         published_text, published_parsed = extract_publish_time(html, url)
-
-        # 再抽摘要
         soup = BeautifulSoup(html, 'lxml')
         for sel in ['meta[name="description"]','meta[name="Description"]','meta[property="og:description"]','meta[name="og:description"]']:
             tag = soup.select_one(sel)
@@ -520,20 +504,14 @@ def fetch_page_summary_and_time(url: str) -> Tuple[str, Optional[str], Optional[
     return (summary, published_text, published_parsed)
 
 def attach_summaries(items: List[Dict[str, Any]]) -> None:
-    """
-    补齐摘要与时间；并过滤过旧稿（默认：两年前及更早的稿件丢弃）。
-    如需保留旧稿，可把“过滤”改为在 score_item 中降权。
-    """
     now_year = dt.datetime.now(CN_TZ).year
     keep_items = []
 
     for it in items:
-        # 先用已有字段
         s = strip_html(it.get('summary', '')) if it.get('summary') else ''
         pub_txt = it.get('published', '')
         pub_parsed = it.get('published_parsed')
 
-        # 不足则从正文页补
         if not s or not pub_parsed:
             summary2, pub_txt2, pub_parsed2 = fetch_page_summary_and_time(it['url'])
             if not s and summary2:
@@ -548,7 +526,6 @@ def attach_summaries(items: List[Dict[str, Any]]) -> None:
         if pub_parsed:
             it['published_parsed'] = pub_parsed
 
-        # ——过滤过旧稿：两年前及更早（可按需调整或改为降权）
         y = None
         if it.get('published_parsed'):
             try:
@@ -560,7 +537,6 @@ def attach_summaries(items: List[Dict[str, Any]]) -> None:
             y = int(m.group(1)) if m else None
 
         if y and y < now_year - 2:
-            # 跳过旧稿（如 2017 年）
             continue
 
         keep_items.append(it)
@@ -621,16 +597,17 @@ body{
   font:16px/1.6 system-ui,-apple-system,Segoe UI,Roboto,Arial,"Microsoft Yahei",sans-serif
 }
 .wrap{max-width:880px;margin:0 auto}
+.card{background:var(--card);border:1px solid #e5e7eb;border-radius:10px;padding:14px 16px;margin:10px 0}
 header h1{
-  margin:0 0 4px 0;
+  margin:6px 0 4px 0;
   font-size:1.6rem;
   text-align:center; /* 标题置中 */
 }
 header .ts{color:var(--muted);font-size:.9rem;margin-bottom:6px}
-nav.quicklinks{margin:4px 0 12px 0;font-size:.95rem}
-nav.quicklinks a{color:#0969da;text-decoration:none;margin-right:10px}
+nav.quicklinks{display:flex;gap:14px;justify-content:center;flex-wrap:wrap}
+nav.quicklinks a{color:#0969da;text-decoration:none}
 nav.quicklinks a:hover{text-decoration:underline}
-.card{background:var(--card);border:1px solid #e5e7eb;border-radius:10px;padding:14px 16px;margin:10px 0}
+.quickcard{padding:10px 14px}            /* 顶部入口使用卡片外观 */
 .idx{display:inline-block;width:36px;color:#888}
 .title a{color:var(--link);text-decoration:none}
 .title a:hover{text-decoration:underline}
@@ -645,12 +622,20 @@ footer{color:var(--muted);font-size:.85rem;margin-top:28px}
         '<meta http-equiv="refresh" content="3600">'
         '<meta name="description" content="今日热点新闻（自动评分排序，汇聚多家权威媒体来源，定时更新）。" />'
         '<title>今日热点新闻</title><style>' + css + '</style></head><body>'
-        '<div class="wrap"><header><h1>今日热点新闻</h1>'
+        '<div class="wrap"><header>'
+
+        # ① 置顶：把“天气预报 / 豆包”放入卡片中（与新闻卡片风格一致）
+        '<div class="card quickcard">'
         '<nav class="quicklinks">'
         '<a href="https://wap.weather.com.cn/mweather/" target="_blank" rel="noopener noreferrer">天气预报</a>'
         ' · '
         '<a href="https://www.doubao.com/" target="_blank" rel="noopener noreferrer">豆包</a>'
         '</nav>'
+        '</div>'
+
+        # ② 标题置于“快速入口卡片”的下一行，居中显示
+        '<h1>今日热点新闻</h1>'
+
         f'<div class="ts">生成时间：{now}</div></header><section>'
     )
 
@@ -664,7 +649,7 @@ footer{color:var(--muted);font-size:.85rem;margin-top:28px}
         rows.append(
             (
                 f"<article class='card'><div class='title'><span class='idx'>{i:02d}.</span>"
-                f"<a href='{url}' target='_blank' rel='noopener noreferrer'>{title}</a></div>"
+                f"{url}{title}</a></div>"
                 f"<div class='meta'>来源：{htmllib.escape(srcs)}；日期：{htmllib.escape(pub)}</div>"
                 f"<div class='sum'>摘要：{summary}</div></article>"
             )
@@ -710,7 +695,7 @@ SOURCES: List[Tuple[str, Dict[str, str]]] = [
 def main():
     parser = argparse.ArgumentParser(description='CN Hot News Ranker (HTML only) — one-file version')
 
-    # 兼容旧参数：仅接受并忽略（方便你不改工作流）
+    # 兼容旧参数：仅接受并忽略（方便不改工作流）
     parser.add_argument('--no-txt', action='store_true', help='(兼容参数) 不导出 TXT；已移除，忽略之')
     parser.add_argument('--no-docx', action='store_true', help='(兼容参数) 不导出 DOCX；已移除，忽略之')
 
