@@ -3,16 +3,14 @@
 """
 CN Hot News Ranker (one-file version)  —— 仅 HTML 输出
 
-变更要点（本版相对你原始文件的修改）：
+变更要点：
 1) 仅显示源站原样时间：
-   - extract_publish_time() 现在返回 (published_text, published_parsed, published_raw)
+   - extract_publish_time() 返回 (published_text, published_parsed, published_raw)
    - fetch_page_summary_and_time() 同步返回 published_raw
-   - attach_summaries() 强制以正文页时间覆盖显示值，并保存 published_raw
+   - attach_summaries() 用正文页时间覆盖显示值，保存 published_raw
    - save_to_html() 渲染优先显示 it['published_raw']，抓不到才回退到规范化值
 
 2) 排序/打分仍使用规范化后的时间（struct_time），不受影响。
-
-Copyright © 2026
 """
 
 import os, re, time, argparse, html as htmllib, json
@@ -172,7 +170,6 @@ def fetch_rss(feed_url: str, source_name: str) -> List[Dict[str, Any]]:
         if not title or not link:
             continue
         summary = strip_html(getattr(e, 'summary', ''))
-        # RSS 的 published_parsed 默认视为 UTC；最终渲染时统一转为北京时间
         published = normalize_space(getattr(e, 'published', '')) or normalize_space(getattr(e, 'updated', ''))
         pub_parsed = getattr(e, 'published_parsed', None) or getattr(e, 'updated_parsed', None)
         items.append({
@@ -659,7 +656,7 @@ def rank_items(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     return sorted(items, key=score_item, reverse=True)
 
 def fmt_pub_time(it: Dict[str, Any]) -> str:
-    """最终渲染为北京时间（仅作回退用；正常优先显示 published_raw）"""
+    """北京时间（仅作回退用；正常优先显示 published_raw）"""
     if it.get('published_parsed'):
         try:
             pub_dt = dt.datetime(*it['published_parsed'][:6])
@@ -684,7 +681,7 @@ body{
 .wrap{max-width:880px;margin:0 auto}
 /* 共用卡片外观 */
 .card{background:var(--card);border:1px solid #e5e7eb;border-radius:14px;padding:14px 16px;margin:10px 0}
-/* 顶部“便捷小链接”卡片（更靠上 & 小标题更小） */
+/* 顶部“便捷小链接”卡片 */
 .quickcard{position:relative;border:2px solid #334155;background:#f3f4f6;margin-top:-6px}
 .quickcard-title{
   position:absolute; top:-14px; left:50%; transform:translateX(-50%);
@@ -708,7 +705,8 @@ header .ts{color:var(--muted);font-size:.9rem;margin-bottom:6px}
 .idx{display:inline-block;width:36px;color:#888}
 .title a{color:var(--link);text-decoration:none}
 .title a:hover{text-decoration:underline}
-.meta{color:var(--muted);font-sizesum{margin-top:6px}
+.meta{color:var(--muted);font-size:.9rem;margin-top:4px}
+.sum{margin-top:6px}
 footer{color:var(--muted);font-size:.85rem;margin-top:28px}
     """.strip()
 
@@ -723,11 +721,11 @@ footer{color:var(--muted);font-size:.85rem;margin-top:28px}
         '<div class="card quickcard">'
         '<div class="quickcard-title">便捷小链接</div>'
         '<nav class="quicklinks">'
-        'https://wap.weather.com.cn/mweather/天气预报</a>'
-        'https://www.doubao.com/豆包</a>'
-        'https://www.ip138.com/ditie/城市地铁</a>'
-        'https://m.hao268.com/网址之家</a>'
-        'https://wap.baidu.com/百度</a>'
+        '<a href="https://wap.weather.com.cn/mweather/" target="_blank" rel="noopener noreferrer">天气预报</a>'
+        '<a href="https://www.doubao.com/" target="_blank" rel="noopener noreferrer">豆包</a>'
+        '<a href="https://www.ip138.com/ditie/" target="_blank" rel="noopener noreferrer">城市地铁</a>'
+        '<a href="https://m.hao268.com/" target="_blank" rel="noopener noreferrer">网址之家</a>'
+        '<a href="https://wap.baidu.com/" target="_blank" rel="noopener noreferrer">百度</a>'
         '</nav>'
         '</div>'
         # ② 标题放在卡片下方
@@ -748,7 +746,7 @@ footer{color:var(--muted);font-size:.85rem;margin-top:28px}
         rows.append(
             (
                 f"<article class='card'><div class='title'><span class='idx'>{i:02d}.</span>"
-                f"{url}{title}</a></div>"
+                f"<a href='{url}' target='_blank' rel='noopener noreferrer'>{title}</a></div>"
                 f"<div class='meta'>来源：{htmllib.escape(srcs)}；日期：{htmllib.escape(pub_display)}</div>"
                 f"<div class='sum'>摘要：{summary}</div></article>"
             )
@@ -761,7 +759,7 @@ footer{color:var(--muted);font-size:.85rem;margin-top:28px}
     with open(out_fullpath, 'w', encoding='utf-8') as f:
         f.write(head + "\n".join(rows) + tail)
 
-# 数据源（含三家更稳入口；搜狐 RSS 修正为完整 https 链接 + 半角引号）
+# 数据源
 SOURCES: List[Tuple[str, Dict[str, str]]] = [
     ("中新网-即时", {"rss": "https://www.chinanews.com.cn/rss/scroll-news.xml"}),
     ("中新网-要闻", {"rss": "https://www.chinanews.com.cn/rss/importnews.xml"}),
