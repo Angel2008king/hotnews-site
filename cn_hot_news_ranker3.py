@@ -1,16 +1,17 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-CN Hot News Ranker (one-file version) —— 仅 HTML 输出（显示“源站原样时间”）
-
-要点：
-- 列表页“日期”严格显示正文页抓到的原样字符串 published_raw（不改格式、不换时区、不补秒）
-- 排序/评分可选使用解析后的时间（若能从原样字符串解析成功）；解析失败不影响显示
-- 不再使用 URL 日期或 RSS 时间来“造”显示值（防止出现 00:00）
+CN Hot News Ranker (one-file version)
+文件名：cn_hot_news_ranker3.py
+- 单文件整合：兼容旧命令行参数（--no-txt / --no-docx）
+- 顶部“便捷小链接”卡片（天气预报/豆包/城市地铁/网址之家/百度），标题置于其下且居中
+- 站点精准选择器 + 回退；摘要提取；稳健网络；评分排序
+- 从正文页抽取“权威发布时间”，统一以北京时间渲染；可选过滤旧稿（默认：丢弃两年前及更早）
 """
 
 import os, re, time, argparse, html as htmllib, json
 import datetime as dt
+from datetime import timezone
 from email.utils import parsedate_to_datetime
 from typing import List, Dict, Tuple, Optional, Any
 
@@ -23,7 +24,8 @@ except Exception:
     feedparser = None
 
 # ---------- 常量 & 基础工具 ----------
-CN_TZ = dt.timezone(dt.timedelta(hours=8), name='Asia/Shanghai')  # 仅用于排序（可选）
+CN_TZ = dt.timezone(dt.timedelta(hours=8), name='Asia/Shanghai')   # 统一北京时间
+
 MAX_ITEMS_PER_SOURCE = 5
 TOP_N = 38
 SLEEP_BETWEEN = 0.5
@@ -54,6 +56,14 @@ SOURCE_WEIGHT = {
     "南方都市报": 2, "澎湃新闻": 3, "财经网": 3, "凤凰网": 2, "搜狐新闻": 2,
 }
 
+UA_POOL = [
+    ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+     "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0 Safari/537.36"),
+    ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+     "AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15"),
+    ("Mozilla/5.0 (X11; Ubuntu; Linux x86_64; rv:122.0) Gecko/20100101 Firefox/122.0"),
+]
+
 def _default_outdir() -> str:
     env = os.environ.get("HOTNEWS_OUTDIR")
     if env:
@@ -68,13 +78,6 @@ OUTPUT_DIR = _default_outdir()
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
 _session = requests.Session()
-UA_POOL = [
-    ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-     "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0 Safari/537.36"),
-    ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
-     "AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15"),
-    ("Mozilla/5.0 (X11; Ubuntu; Linux x86_64; rv:122.0) Gecko/20100101 Firefox/122.0"),
-]
 _session.headers.update({"User-Agent": UA_POOL[0]})
 
 for key in ["HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy"]:
@@ -108,7 +111,7 @@ def strip_html(raw: str) -> str:
             tag.extract()
         return normalize_space(soup.get_text(separator=" "))
     except Exception:
-        t = re.sub(r"<script.*?>.*?</script>|<style.*?>.*?</style>", "", raw, flags=re.S|re.I)
+        t = re.sub(r"<script.*?>.*?</script>|<style.*?>.*?</style>", "", raw, flags=re.S | re.I)
         t = re.sub(r"<[^>]+>", "", t)
         return normalize_space(t)
 
@@ -165,7 +168,7 @@ def fetch_rss(feed_url: str, source_name: str) -> List[Dict[str, Any]]:
         if not title or not link:
             continue
         summary = strip_html(getattr(e, 'summary', ''))
-        # 注意：RSS 的时间不用于显示，只作可能的排序参考（后续会被正文覆盖）
+        # RSS 的 published_parsed 默认视为 UTC；最终渲染时统一转为北京时间
         published = normalize_space(getattr(e, 'published', '')) or normalize_space(getattr(e, 'updated', ''))
         pub_parsed = getattr(e, 'published_parsed', None) or getattr(e, 'updated_parsed', None)
         items.append({
@@ -324,7 +327,6 @@ def fetch_from_source(name: str, conf: Dict[str, str]) -> List[Dict[str, Any]]:
                     return items
             except Exception as e:
                 print(f"[警告] {name} RSS 抓取失败：{e}; 尝试 HTML 解析…")
-
         if 'html' in conf and 'parser' in conf:
             html = get_html(conf['html'])
             parser = PARSERS[conf['parser']]
@@ -343,8 +345,8 @@ def is_excluded(title: str, summary: str = '') -> bool:
 
 def dedup_and_group(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     def canon_title(t: str) -> str:
-        t = re.sub(r"[（(【\[\][^）)】\]]{1,30}[）)】\]]", "", t)  # 去括号内副标题
-        t = re.sub(r"^\s*(快讯|速览|重磅|独家)\s*[｜|]\s*", "", t)  # 去前缀标识
+        t = re.sub(r"[（(【\[][^）)】\]]{1,30}[）)】\]]", "", t)  # 去括号内副标题
+        t = re.sub(r"^\s*(快讯|速览|重磅|独家)\s*[|｜]\s*", "", t)  # 去前缀标识
         return normalize_space(t)
 
     buckets: Dict[str, Dict[str, Any]] = {}
@@ -361,7 +363,7 @@ def dedup_and_group(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
             b['sources'].add(it.get('source', ''))
             b['via'].add(it.get('via', ''))
             if ('news.' in it['url'] or '/202' in it['url']) and 'video' not in it['url']:
-                b['url'] = it['url']
+                b['url'] = it['url']  # 更像“新闻”的链接优先
             if it.get('published_parsed') and not b.get('published_parsed'):
                 b['published_parsed'] = it['published_parsed']
                 b['published'] = it.get('published', '')
@@ -379,138 +381,171 @@ def dedup_and_group(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         })
     return merged
 
-# ====== 仅用于“排序”的解析器（不会影响显示） ======
-def _parse_datetime_for_sorting(raw: str) -> Optional[dt.datetime]:
-    """
-    尝试从原样字符串中解析时间，仅用于排序；解析失败返回 None。
-    """
-    if not raw:
-        return None
-    s = normalize_space(raw)
+# ===== 规范化时间字符串 -> datetime（无时区→北京时间；有时区→换算到北京时间） =====
+def _parse_datetime_str(s: str) -> Optional[dt.datetime]:
+    s = normalize_space(s)
+    # 1) 2026-03-03 23:06(:ss) 或 2026/03/03 23:06(:ss)
+    m = re.search(r'(\d{4})[-/](\d{1,2})[-/](\d{1,2})(?:\s+(\d{1,2}):(\d{2})(?::(\d{2}))?)?', s)
+    if m:
+        y, mo, d = int(m.group(1)), int(m.group(2)), int(m.group(3))
+        hh = int(m.group(4) or 0); mm = int(m.group(5) or 0); ss = int(m.group(6) or 0)
+        try:
+            return dt.datetime(y, mo, d, hh, mm, ss, tzinfo=CN_TZ)  # 按北京时间
+        except Exception:
+            return None
+    # 2) 2026年3月3日 23:06(:ss)
+    m = re.search(r'(\d{4})年(\d{1,2})月(\d{1,2})日(?:\s*(\d{1,2}):(\d{2})(?::(\d{2}))?)?', s)
+    if m:
+        y, mo, d = int(m.group(1)), int(m.group(2)), int(m.group(3))
+        hh = int(m.group(4) or 0); mm = int(m.group(5) or 0); ss = int(m.group(6) or 0)
+        try:
+            return dt.datetime(y, mo, d, hh, mm, ss, tzinfo=CN_TZ)
+        except Exception:
+            return None
+    return None
 
-    # RFC/HTTP 日期
+def _try_iso_or_rfc(s: str) -> Optional[dt.datetime]:
+    """尝试解析 ISO/RFC；无时区→北京时间；有时区→换算到北京时间"""
+    s = normalize_space(s)
+    # RFC
     try:
         d = parsedate_to_datetime(s)
         if d is not None:
-            return d.astimezone(CN_TZ) if d.tzinfo else d.replace(tzinfo=CN_TZ)
+            if d.tzinfo is None:
+                d = d.replace(tzinfo=CN_TZ)
+            else:
+                d = d.astimezone(CN_TZ)
+            return d
     except Exception:
         pass
-
-    # ISO（含 Z/+08:00）
+    # ISO
     try:
         d = dt.datetime.fromisoformat(s.replace('Z', '+00:00'))
-        return d.astimezone(CN_TZ) if d.tzinfo else d.replace(tzinfo=CN_TZ)
+        if d.tzinfo is None:
+            d = d.replace(tzinfo=CN_TZ)
+        else:
+            d = d.astimezone(CN_TZ)
+        return d
     except Exception:
-        pass
+        return None
 
-    # YYYY-MM-DD HH:MM(:SS) 或 YYYY/MM/DD HH:MM(:SS)
-    m = re.search(r'(\d{4})[-/](\d{1,2})[-/](\d{1,2})\s+(\d{1,2}):(\d{2})(?::(\d{2}))?', s)
-    if m:
-        try:
-            return dt.datetime(int(m.group(1)), int(m.group(2)), int(m.group(3)),
-                               int(m.group(4)), int(m.group(5)), int(m.group(6) or 0), tzinfo=CN_TZ)
-        except Exception:
-            return None
-
-    # YYYY年M月D日 HH:MM(:SS)
-    m = re.search(r'(\d{4})年(\d{1,2})月(\d{1,2})日(?:\s*(\d{1,2}):(\d{2})(?::(\d{2}))?)?', s)
-    if m:
-        try:
-            return dt.datetime(int(m.group(1)), int(m.group(2)), int(m.group(3)),
-                               int(m.group(4) or 0), int(m.group(5) or 0), int(m.group(6) or 0), tzinfo=CN_TZ)
-        except Exception:
-            return None
-
-    # 解析失败
-    return None
-
-# ====== 抓“原样时间字符串” + 可选解析为排序时间 ======
-def extract_publish_time_raw(html: str, url: str) -> Tuple[Optional[str], Optional[time.struct_time]]:
-    """
-    返回：
-      published_raw: 正文页看到的“原样时间字符串”（仅用于显示）
-      published_parsed: 若能从 raw 解析出 struct_time（用于排序），解析失败则为 None
-    """
+# ===== 从正文或 URL 抽取发布时间（含网易/新华专用位；最终一律以北京时间返回） =====
+def extract_publish_time(html: str, url: str) -> Tuple[Optional[str], Optional[time.struct_time]]:
     soup = BeautifulSoup(html, 'lxml')
 
-    # 站点特定位：中新网/新华/网易等的常见 DOM 或 meta
-    candidates: List[str] = []
+    # --- 站点特定：新华网 ---
+    xw_meta = soup.find('meta', attrs={'name': 'pubdate'}) or soup.find('meta', attrs={'name': 'publishdate'})
+    if xw_meta and xw_meta.get('content'):
+        d = _parse_datetime_str(xw_meta['content']) or _try_iso_or_rfc(xw_meta['content'])
+        if d:
+            return (d.strftime('%Y-%m-%d %H:%M'), d.timetuple())
+    tag = soup.select_one('#pubtime') or soup.select_one('.header-info .time')
+    if tag:
+        d = _parse_datetime_str(tag.get_text())
+        if d:
+            return (d.strftime('%Y-%m-%d %H:%M'), d.timetuple())
 
-    # ① 常见显式 DOM 文本
-    for sel in [
-        '#pubtime', '.header-info .time', '.post_time_source', '.post_info', '.post__time',
-        '.time', '.article-time', '.publish-time', '.date', '.pubdate', '.article__time'
-    ]:
-        tag = soup.select_one(sel)
-        if tag:
-            txt = normalize_space(tag.get_text(separator=" "))
-            if txt: candidates.append(txt)
+    # --- 站点特定：网易 news.163.com ---
+    if 'news.163.com' in url or 'www.163.com' in url:
+        ptime = soup.select_one('#ptime') or soup.select_one('.post_time_source') or soup.select_one('.post_info')
+        if ptime:
+            d = _parse_datetime_str(ptime.get_text())
+            if d:
+                return (d.strftime('%Y-%m-%d %H:%M'), d.timetuple())
+        meta_ptime = soup.find('meta', attrs={'name': 'ptime'})
+        if meta_ptime and meta_ptime.get('content'):
+            d = _parse_datetime_str(meta_ptime['content']) or _try_iso_or_rfc(meta_ptime['content'])
+            if d:
+                return (d.strftime('%Y-%m-%d %H:%M'), d.timetuple())
 
-    # ② meta 值（不改格式，直接取 content）
-    for attrs in [
-        {'name': 'pubdate'}, {'name': 'publishdate'}, {'name': 'date'},
-        {'property': 'article:published_time'}, {'itemprop': 'datePublished'},
-        {'name': 'DC.date.issued'}, {'name': 'ptime'}
-    ]:
-        tag = soup.find('meta', attrs=attrs)
-        if tag and tag.get('content'):
-            content = normalize_space(tag['content'])
-            if content: candidates.append(content)
+    # --- 通用 meta 位 ---
+    META_CANDIDATES = [
+        ('meta', {'property': 'article:published_time'}, 'content'),
+        ('meta', {'name': 'publishdate'}, 'content'),
+        ('meta', {'name': 'PubDate'}, 'content'),
+        ('meta', {'itemprop': 'datePublished'}, 'content'),
+        ('meta', {'name': 'date'}, 'content'),
+        ('meta', {'name': 'DC.date.issued'}, 'content'),
+    ]
+    for tag_name, attrs, attr_key in META_CANDIDATES:
+        tag = soup.find(tag_name, attrs=attrs)
+        if tag and tag.get(attr_key):
+            content = tag[attr_key]
+            d = _parse_datetime_str(content) or _try_iso_or_rfc(content)
+            if not d:
+                m = re.search(r'(\d{4})(\d{2})(\d{2})', content)
+                if m:
+                    try:
+                        d = dt.datetime(int(m.group(1)), int(m.group(2)), int(m.group(3)), tzinfo=CN_TZ)
+                    except Exception:
+                        d = None
+            if d:
+                return (d.strftime('%Y-%m-%d %H:%M'), d.timetuple())
 
-    # ③ JSON-LD
+    # --- JSON-LD {datePublished} ---
     for node in soup.select('script[type="application/ld+json"]'):
         try:
             data = json.loads(node.get_text(strip=True))
             nodes = data if isinstance(data, list) else [data]
             for obj in nodes:
-                if isinstance(obj, dict):
-                    if 'datePublished' in obj:
-                        s = normalize_space(str(obj['datePublished']))
-                        if s: candidates.append(s)
-                    if 'dateCreated' in obj:
-                        s = normalize_space(str(obj['dateCreated']))
-                        if s: candidates.append(s)
+                if isinstance(obj, dict) and 'datePublished' in obj:
+                    s = str(obj['datePublished'])
+                    d = _parse_datetime_str(s) or _try_iso_or_rfc(s)
+                    if not d:
+                        m = re.search(r'(\d{4})(\d{2})(\d{2})', s)
+                        if m:
+                            try:
+                                d = dt.datetime(int(m.group(1)), int(m.group(2)), int(m.group(3)), tzinfo=CN_TZ)
+                            except Exception:
+                                d = None
+                    if d:
+                        return (d.strftime('%Y-%m-%d %H:%M'), d.timetuple())
         except Exception:
             pass
 
-    # ④ <time> 标签
+    # --- <time> ---
     t = soup.find('time')
     if t:
         cand = t.get('datetime') or t.get_text(strip=True)
         if cand:
-            candidates.append(normalize_space(cand))
+            d = _parse_datetime_str(cand) or _try_iso_or_rfc(cand)
+            if not d:
+                m = re.search(r'(\d{4})(\d{2})(\d{2})', cand)
+                if m:
+                    try:
+                        d = dt.datetime(int(m.group(1)), int(m.group(2)), int(m.group(3)), tzinfo=CN_TZ)
+                    except Exception:
+                        d = None
+            if d:
+                return (d.strftime('%Y-%m-%d %H:%M'), d.timetuple())
 
-    # ⑤ 正文里的“发布时间/发布于/时间/日期： ...”文案（原样取右侧字符串）
+    # --- 文本兜底：“发布时间|发布于|时间|日期：YYYY-MM-DD HH:MM(:SS)” ---
     body_text = soup.get_text(separator=' ', strip=True)
-    m = re.search(r'(发布时间|发布于|时间|日期)\s*[:：]\s*([^\s].{4,32}?)\b', body_text)
+    m = re.search(r'(发布时间|发布于|时间|日期)\s*[：:]\s*(\d{4}[-/]\d{1,2}[-/]\d{1,2}\s+\d{1,2}:\d{2}(?::\d{2})?)', body_text)
     if m:
-        candidates.append(normalize_space(m.group(2)))
-
-    # 选择一个最像“时间”的候选作为显示值（优先含“时:分”的）
-    def has_hhmm(s: str) -> bool:
-        return bool(re.search(r'\d{1,2}:\d{2}', s))
-    published_raw = None
-    if candidates:
-        # 先选含“时:分”的；否则选第一个非空
-        with_hhmm = [c for c in candidates if has_hhmm(c)]
-        published_raw = with_hhmm[0] if with_hhmm else candidates[0]
-
-    # ——仅用于排序：尝试解析 raw；解析失败则返回 None
-    published_parsed = None
-    if published_raw:
-        d = _parse_datetime_for_sorting(published_raw)
+        d = _parse_datetime_str(m.group(2))
         if d:
-            published_parsed = d.timetuple()
+            return (d.strftime('%Y-%m-%d %H:%M'), d.timetuple())
 
-    return (published_raw, published_parsed)
+    # --- URL 推断日期（仅日期，不造时分秒） ---
+    m = (re.search(r'(\d{4})[-/](\d{1,2})[-/](\d{1,2})', url)
+         or re.search(r'(\d{4})(\d{2})(\d{2})', url))
+    if m:
+        try:
+            y, mo, d = int(m.group(1)), int(m.group(2)), int(m.group(3))
+            dtt = dt.datetime(y, mo, d, tzinfo=CN_TZ)
+            return (dtt.strftime('%Y-%m-%d %H:%M'), dtt.timetuple())
+        except Exception:
+            pass
+
+    return (None, None)
 
 def fetch_page_summary_and_time(url: str) -> Tuple[str, Optional[str], Optional[time.struct_time]]:
     summary = ''
-    published_raw, published_parsed = (None, None)
+    published_text, published_parsed = (None, None)
     try:
         html = get_html(url)
-        published_raw, published_parsed = extract_publish_time_raw(html, url)
-
+        published_text, published_parsed = extract_publish_time(html, url)
         soup = BeautifulSoup(html, 'lxml')
         for sel in ['meta[name="description"]','meta[name="Description"]','meta[property="og:description"]','meta[name="og:description"]']:
             tag = soup.select_one(sel)
@@ -525,35 +560,32 @@ def fetch_page_summary_and_time(url: str) -> Tuple[str, Optional[str], Optional[
                     break
     except Exception:
         pass
-    return (summary, published_raw, published_parsed)
+    return (summary, published_text, published_parsed)
 
 def attach_summaries(items: List[Dict[str, Any]]) -> None:
     now_year = dt.datetime.now(CN_TZ).year
     keep_items = []
+
     for it in items:
         s = strip_html(it.get('summary', '')) if it.get('summary') else ''
-        pub_parsed = it.get('published_parsed')  # 仅排序用
-        pub_raw = it.get('published_raw')        # 显示用
+        pub_txt = it.get('published', '')
+        pub_parsed = it.get('published_parsed')
 
-        # —— 总是去正文页抓一次，确保显示值来自正文页
-        summary2, pub_raw2, pub_parsed2 = fetch_page_summary_and_time(it['url'])
-
-        if not s and summary2:
-            s = summary2
-
-        # —— 用正文页结果覆盖（抓到就用）
-        if pub_raw2:
-            pub_raw = pub_raw2
-        if pub_parsed2:
-            pub_parsed = pub_parsed2
+        if not s or not pub_parsed:
+            summary2, pub_txt2, pub_parsed2 = fetch_page_summary_and_time(it['url'])
+            if not s and summary2:
+                s = summary2
+            if not pub_parsed and pub_parsed2:
+                pub_parsed = pub_parsed2
+                pub_txt = pub_txt2 or pub_txt
 
         it['summary_final'] = smart_trim(s or it['title'], 160)
+        if pub_txt:
+            it['published'] = pub_txt
         if pub_parsed:
             it['published_parsed'] = pub_parsed
-        if pub_raw:
-            it['published_raw'] = pub_raw  # 给渲染层使用
 
-        # ——过滤过旧稿：两年前及更早（优先根据可解析时间；否则根据 URL 年份粗判）
+        # ——过滤过旧稿：两年前及更早
         y = None
         if it.get('published_parsed'):
             try:
@@ -563,8 +595,10 @@ def attach_summaries(items: List[Dict[str, Any]]) -> None:
         if y is None:
             m = re.search(r'(\d{4})', it.get('url',''))
             y = int(m.group(1)) if m else None
+
         if y and y < now_year - 2:
             continue
+
         keep_items.append(it)
 
     items.clear()
@@ -575,22 +609,27 @@ def score_item(it: Dict[str, Any]) -> float:
     title = it.get('title', '')
     summary = it.get('summary_final') or it.get('summary', '')
     txt = f"{title} {summary}"
+
     src_count = len(it.get('sources', []))
     score += 6 if src_count >= 3 else 4 if src_count == 2 else 1 if src_count == 1 else 0
+
     srcw = [SOURCE_WEIGHT.get(s, 1) for s in it.get('sources', [])]
     if srcw:
         score += min(sum(srcw), 10)
+
     for k, w in HOT_KEYWORDS.items():
         if k in txt:
             score += w
+
     if re.search(r"\d", title): score += 1
     if any(c in title for c in CITY_KEYWORDS): score += 1
     if 10 <= len(title) <= 30: score += 1
 
-    # 新鲜度加分（若能解析t.get('published_parsed')
+    pp = it.get('published_parsed')
     if pp:
         try:
             pub_dt = dt.datetime(*pp[:6])
+            # 统一：无 tz → 北京时间；有 tz → 转北京时间
             if not pub_dt.tzinfo:
                 pub_dt = pub_dt.replace(tzinfo=CN_TZ)
             else:
@@ -604,6 +643,20 @@ def score_item(it: Dict[str, Any]) -> float:
 def rank_items(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     return sorted(items, key=score_item, reverse=True)
 
+def fmt_pub_time(it: Dict[str, Any]) -> str:
+    """最终渲染为北京时间"""
+    if it.get('published_parsed'):
+        try:
+            pub_dt = dt.datetime(*it['published_parsed'][:6])
+            if not pub_dt.tzinfo:
+                pub_dt = pub_dt.replace(tzinfo=CN_TZ)
+            else:
+                pub_dt = pub_dt.astimezone(CN_TZ)
+            return pub_dt.strftime('%Y-%m-%d %H:%M')
+        except Exception:
+            return it.get('published', '')
+    return it.get('published', '')
+
 def save_to_html(items: List[Dict[str, Any]], out_fullpath: str):
     now = dt.datetime.now(CN_TZ).strftime('%Y-%m-%d %H:%M')
     css = """
@@ -614,8 +667,10 @@ body{
   font:16px/1.6 system-ui,-apple-system,Segoe UI,Roboto,Arial,"Microsoft Yahei",sans-serif
 }
 .wrap{max-width:880px;margin:0 auto}
+
 /* 共用卡片外观 */
 .card{background:var(--card);border:1px solid #e5e7eb;border-radius:14px;padding:14px 16px;margin:10px 0}
+
 /* 顶部“便捷小链接”卡片（更靠上 & 小标题更小） */
 .quickcard{position:relative;border:2px solid #334155;background:#f3f4f6;margin-top:-6px}
 .quickcard-title{
@@ -629,6 +684,7 @@ nav.quicklinks{
 }
 nav.quicklinks a{color:#0b66d6;text-decoration:none}
 nav.quicklinks a:hover{text-decoration:underline}
+
 /* 页面标题 */
 header h1{
   margin:8px 0 6px 0;
@@ -636,6 +692,7 @@ header h1{
   text-align:center;
 }
 header .ts{color:var(--muted);font-size:.9rem;margin-bottom:6px}
+
 /* 新闻卡片与内容 */
 .idx{display:inline-block;width:36px;color:#888}
 .title a{color:var(--link);text-decoration:none}
@@ -652,19 +709,22 @@ footer{color:var(--muted);font-size:.85rem;margin-top:28px}
         '<meta name="description" content="今日热点新闻（自动评分排序，汇聚多家权威媒体来源，定时更新）。" />'
         '<title>今日热点新闻</title><style>' + css + '</style></head><body>'
         '<div class="wrap"><header>'
-        # ① 顶部“便捷小链接”卡片（正确的 <a>）
+
+        # ① 顶部“便捷小链接”卡片（标准 <a>）
         '<div class="card quickcard">'
         '<div class="quickcard-title">便捷小链接</div>'
         '<nav class="quicklinks">'
-        'https://wap.weather.com.cn/mweather/天气预报</a>'
-        'https://www.doubao.com/豆包</a>'
-        'https://www.ip138.com/ditie/城市地铁</a>'
-        'https://m.hao268.com/网址之家</a>'
-        'https://wap.baidu.com/百度</a>'
+        '<a href="https://wap.weather.com.cn/mweather/" target="_blank" rel="noopener noreferrer">天气预报</a>'
+        '<a href="https://www.doubao.com/" target="_blank" rel="noopener noreferrer">豆包</a>'
+        '<a href="https://www.ip138.com/ditie/" target="_blank" rel="noopener noreferrer">城市地铁</a>'
+        '<a href="https://m.hao268.com/" target="_blank" rel="noopener noreferrer">网址之家</a>'
+        '<a href="https://wap.baidu.com/" target="_blank" rel="noopener noreferrer">百度</a>'
         '</nav>'
         '</div>'
+
         # ② 标题放在卡片下方
         '<h1>今日热点新闻</h1>'
+
         f'<div class="ts">生成时间：{now}</div></header><section>'
     )
 
@@ -673,16 +733,13 @@ footer{color:var(--muted);font-size:.85rem;margin-top:28px}
         title = htmllib.escape(it['title'])
         url = htmllib.escape(it['url'])
         srcs = '、'.join(it.get('sources', [])) or '未知'
-
-        # ——显示：只用源站原样时间；抓不到就显示占位符
-        pub_display = it.get('published_raw') or '—'
-
+        pub = fmt_pub_time(it) or '—'
         summary = htmllib.escape(it.get('summary_final', '') or it.get('summary', '') or it['title'])
         rows.append(
             (
                 f"<article class='card'><div class='title'><span class='idx'>{i:02d}.</span>"
-                f"{url}{title}</a></div>"
-                f"<div class='meta'>来源：{htmllib.escape(srcs)}；日期：{htmllib.escape(pub_display)}</div>"
+                f"<a href='{url}' target='_blank' rel='noopener noreferrer'>{title}</a></div>"
+                f"<div class='meta'>来源：{htmllib.escape(srcs)}；日期：{htmllib.escape(pub)}</div>"
                 f"<div class='sum'>摘要：{summary}</div></article>"
             )
         )
@@ -691,39 +748,51 @@ footer{color:var(--muted);font-size:.85rem;margin-top:28px}
         "</section><footer>本站每小时自动刷新一次；仅做信息聚合与索引，内容以源站为准。"
         " Copyright © 2026 Yingfeng Su. All rights reserved.</footer></div></body></html>"
     )
+
     with open(out_fullpath, 'w', encoding='utf-8') as f:
         f.write(head + "\n".join(rows) + tail)
 
-# 数据源
+# 数据源（含三家更稳入口；搜狐 RSS 修正为完整 https 链接 + 半角引号）
 SOURCES: List[Tuple[str, Dict[str, str]]] = [
     ("中新网-即时", {"rss": "https://www.chinanews.com.cn/rss/scroll-news.xml"}),
     ("中新网-要闻", {"rss": "https://www.chinanews.com.cn/rss/importnews.xml"}),
     ("中新网-国内", {"rss": "https://www.chinanews.com.cn/rss/china.xml"}),
     ("中新网-社会", {"rss": "https://www.chinanews.com.cn/rss/society.xml"}),
+
     ("央视网-新闻频道", {"html": "https://news.cctv.cn/", "parser": "parse_cctv_index"}),
     ("央视网-国内新闻", {"html": "https://news.cctv.com/china/", "parser": "parse_cctv_china"}),
     ("新华网-首页", {"html": "https://www.news.cn/", "parser": "parse_xinhua"}),
+
     ("环球网-国内", {"html": "https://www.huanqiu.com/", "parser": "parse_huanqiu_china"}),
+
     ("网易新闻-国内", {"html": "https://news.163.com/domestic/", "parser": "parse_net163_domestic"}),
+
     ("澎湃新闻", {"rss": "https://feedx.net/rss/thepaper.xml", "html": "https://www.thepaper.cn/news", "parser": "parse_thepaper"}),
+
     ("南方都市报", {"html": "https://news.southcn.com/node_17a07e5926/?cms_node_post_list_page=1", "parser": "parse_nandu"}),
+
     ("财经网", {"html": "https://finance.caijing.com.cn/", "parser": "parse_caijing"}),
+
     ("凤凰网", {"html": "https://news.ifeng.com/", "parser": "parse_ifeng"}),
+
     ("搜狐新闻", {"rss": "https://rss.news.sohu.com/rss/guonei.xml", "html": "https://news.sohu.com/", "parser": "parse_sohu_news"}),
 ]
 
 # ---------- CLI 主流程（含兼容参数） ----------
 def main():
     parser = argparse.ArgumentParser(description='CN Hot News Ranker (HTML only) — one-file version')
+
     # 兼容旧参数：仅接受并忽略（方便不改工作流）
     parser.add_argument('--no-txt', action='store_true', help='(兼容参数) 不导出 TXT；已移除，忽略之')
     parser.add_argument('--no-docx', action='store_true', help='(兼容参数) 不导出 DOCX；已移除，忽略之')
+
     # 实际有效参数
     parser.add_argument('--html', default=None, help='输出 HTML 文件路径，如 D:\\MyCode\\Hot_Points\\index.html')
     parser.add_argument('--outdir', default=OUTPUT_DIR, help='输出目录（覆盖默认设置）')
     parser.add_argument('--proxy', default=None, help='可选：HTTP/HTTPS 代理，如 http://127.0.0.1:7890')
 
     args = parser.parse_args()
+
     outdir = args.outdir
     os.makedirs(outdir, exist_ok=True)
     if args.proxy:
@@ -751,10 +820,8 @@ def main():
 
     print(f'[汇总] 原始合计 {len(raw)} 条；去重合并 …')
     merged = dedup_and_group(raw)
-
-    print('[摘要] 生成摘要 + 抓取原样时间（正文页覆盖显示值） …')
+    print('[摘要] 生成摘要 + 补齐时间 …')
     attach_summaries(merged)
-
     print(f'[评分] 排序 …')
     ranked = rank_items(merged)
     topn = ranked[:TOP_N]
