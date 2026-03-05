@@ -738,7 +738,7 @@ SOURCES: List[Tuple[str, Dict[str, str]]] = [
 ]
 # ---------- CLI 主流程（含兼容参数） ----------
 def main():
-     print('[过滤] 仅保留今天且距当前≤2小时的新闻 …')
+    print('[过滤] 仅保留今天且距当前≤2小时的新闻 …')
     recent = filter_recent_today(merged, lookback_hours=2, today_only=True)
 
     print('[排序] 按发布时间降序 …')
