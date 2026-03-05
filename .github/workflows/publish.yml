@@ -71,4 +71,3 @@ jobs:
           # 避免偶发非快进错误
           git pull --rebase origin "$REF_NAME" || true
           git push origin HEAD:"$REF_NAME"
-``
