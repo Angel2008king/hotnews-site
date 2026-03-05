@@ -503,17 +503,29 @@ def attach_summaries(items: List[Dict[str, Any]]) -> None:
         summary2, pub_txt2, pub_parsed2 = fetch_page_summary_and_time(it['url'])
         if not s and summary2:
             s = summary2
-        # 覆盖显示值：使用正文页原样字符串
-        if pub_txt2:
-            pub_txt = pub_txt2
-        # 评分/排序仍用解析后的时间
-        if not pub_parsed and pub_parsed2:
+        # 仅当正文页能解析出对应时间时，才覆盖显示 & 解析值，避免显示与过滤不一致
+        if pub_parsed2:
+            pub_txt = pub_txt2 or pub_txt
             pub_parsed = pub_parsed2
         it['summary_final'] = smart_trim(s or it['title'], 160)
-        if pub_txt:
-            it['published'] = pub_txt        # ← 用于显示（原样字符串）
+        # 先写解析值，再决定显示字符串
         if pub_parsed:
             it['published_parsed'] = pub_parsed
+        # 显示优先用与解析相匹配的字符串，否则回退到统一格式
+        if pub_parsed:
+            try:
+                dt_val = dt.datetime(*pub_parsed[:6])
+                if not dt_val.tzinfo:
+                    dt_val = dt_val.replace(tzinfo=CN_TZ)
+                else:
+                    dt_val = dt_val.astimezone(CN_TZ)
+                # 如果没有可靠的原样字符串，则用标准格式
+                if not pub_txt:
+                    pub_txt = dt_val.strftime('%Y-%m-%d %H:%M')
+            except Exception:
+                pass
+        if pub_txt:
+            it['published'] = pub_txt
         # ——过滤过旧稿：两年前及更早
         y = None
         if it.get('published_parsed'):
