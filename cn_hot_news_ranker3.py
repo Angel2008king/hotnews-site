@@ -529,6 +529,67 @@ def attach_summaries(items: List[Dict[str, Any]]) -> None:
         keep_items.append(it)
     items.clear()
     items.extend(keep_items)
+
+
+# ===== 新增：按“今天且<=指定小时内”过滤 + 按发布时间降序排序 =====
+
+
+def _to_cns_datetime(pp):
+    """将 time.struct_time -> datetime(Asia/Shanghai)"""
+    import datetime as dt
+    if not pp:
+        return None
+    from datetime import timezone
+    CN_TZ = dt.timezone(dt.timedelta(hours=8), name='Asia/Shanghai')
+    try:
+        d = dt.datetime(*pp[:6])
+        if d.tzinfo is None:
+            d = d.replace(tzinfo=CN_TZ)
+        else:
+            d = d.astimezone(CN_TZ)
+        return d
+    except Exception:
+        return None
+
+
+def filter_recent_today(items, lookback_hours=2, today_only=True):
+    """
+    仅保留：
+      * 发布时间在“当前时间 lookback_hours 小时内”；
+      * 且（可选）为“今天”的新闻。
+    无发布时间的新闻将被丢弃。
+    """
+    import datetime as dt
+    CN_TZ = dt.timezone(dt.timedelta(hours=8), name='Asia/Shanghai')
+    now = dt.datetime.now(CN_TZ)
+    today = now.date()
+    keep = []
+    for it in items:
+        pp = it.get('published_parsed')
+        pub_dt = _to_cns_datetime(pp)
+        if not pub_dt:
+            continue
+        # 只保留今天
+        if today_only and pub_dt.date() != today:
+            continue
+        # 只保留“<= lookback_hours 内”的
+        diff = (now - pub_dt).total_seconds()
+        if diff < 0:  # 未来时间，丢弃
+            continue
+        if diff > lookback_hours * 3600:
+            continue
+        keep.append(it)
+    return keep
+
+
+
+def sort_by_pub_time_desc(items):
+    return sorted(
+        items,
+        key=lambda it: (_to_cns_datetime(it.get('published_parsed')) or __import__('datetime').datetime.min),
+        reverse=True,
+    )
+
 def score_item(it: Dict[str, Any]) -> float:
     score = 0.0
     title = it.get('title', '')
@@ -677,7 +738,13 @@ SOURCES: List[Tuple[str, Dict[str, str]]] = [
 ]
 # ---------- CLI 主流程（含兼容参数） ----------
 def main():
-    parser = argparse.ArgumentParser(description='CN Hot News Ranker (HTML only) — one-file version')
+     print('[过滤] 仅保留今天且距当前≤2小时的新闻 …')
+    recent = filter_recent_today(merged, lookback_hours=2, today_only=True)
+
+    print('[排序] 按发布时间降序 …')
+    ranked = sort_by_pub_time_desc(recent)
+    topn = ranked[:TOP_N]
+one-file version')
     # 兼容旧参数：仅接受并忽略（方便不改工作流）
     parser.add_argument('--no-txt', action='store_true', help='(兼容参数) 不导出 TXT；已移除，忽略之')
     parser.add_argument('--no-docx', action='store_true', help='(兼容参数) 不导出 DOCX；已移除，忽略之')
