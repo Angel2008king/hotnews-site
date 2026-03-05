@@ -1,36 +1,74 @@
-name: Build & Publish Daily
+name: Build & Publish Hourly
 
 on:
   schedule:
-    - cron: "0 * * * *"  # 每天 08:00 北京时间（GitHub 使用 UTC）
-  workflow_dispatch:
+    # 每小时第 15 分触发（UTC）。北京时间 = 每小时 :15 左右
+    - cron: "15 * * * *"
+  workflow_dispatch:  # 便于手动排查
 
 permissions:
-  contents: write
+  contents: write     # 需要推回仓库
+
+concurrency:
+  group: build-publish-hourly      # 防止并发重叠导致的阻塞
+  cancel-in-progress: false
 
 jobs:
   build:
+    # 同时允许三种触发来源，避免 if 条件把 schedule 跳过
+    if: contains('schedule,workflow_dispatch,push', github.event_name)
     runs-on: ubuntu-latest
+    timeout-minutes: 30            # 限制最长时长，避免下一轮被阻塞
+
+    env:
+      REF_NAME: ${{ github.ref_name }}  # 当前分支名（一般是 main）
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup Python
+      - name: Setup Python 3.11 (with pip cache)
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
+          cache: 'pip'
+          cache-dependency-path: requirements.txt
 
       - name: Install dependencies
-        run: pip install -r requirements.txt
+        shell: bash
+        run: |
+          set -euxo pipefail
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
 
       - name: Generate static site
+        shell: bash
         run: |
-          python cn_hot_news_ranker3.py --html index.html --no-txt --no-docx --outdir .
+          set -euxo pipefail
+          python cn_hot_news_ranker3.py \
+            --html index.html \
+            --no-txt --no-docx \
+            --outdir .
 
-      - name: Commit & push index.html
+      - name: Commit & push index.html if changed
+        shell: bash
         run: |
+          set -euo pipefail
           git config user.name  "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          # 暂存变更
           git add index.html
-          git commit -m "Update site: $(date -u '+%Y-%m-%d %H:%M:%S') UTC" || echo "No changes"
-          git push
+
+          # 仅当有变更时才提交 & 推送，避免无改动导致的非零退出码
+          if git diff --cached --quiet; then
+            echo "No changes"
+            exit 0
+          fi
+
+          git commit -m "chore: update site $(date -u '+%Y-%m-%d %H:%M:%S') UTC"
+
+          # 避免偶发非快进错误
+          git pull --rebase origin "$REF_NAME" || true
+          git push origin HEAD:"$REF_NAME"
+``
