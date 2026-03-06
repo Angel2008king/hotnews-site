@@ -49,7 +49,7 @@ SOURCE_WEIGHT = {
     "央视网-新闻频道": 4, "央视网-国内新闻": 2, "新华网-首页": 1,
     "中新网-即时": 4, "中新网-要闻": 1, "中新网-国内": 2, "中新网-社会": 1,
     "环球网-国内": 3, "网易新闻-国内": 2,
-    "南方都市报": 3, "澎湃新闻": 3, "财经网": 3, "凤凰网": 2, "搜狐新闻": 2,
+    "南方都市报": 3, "澎湃新闻": 0, "财经网": 3, "凤凰网": 2, "搜狐新闻": 2,
 }
 UA_POOL = [
     ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -250,8 +250,8 @@ def parse_nandu(html: str) -> list:
 def parse_thepaper(html: str) -> list:
     soup = BeautifulSoup(html, 'lxml')
     selectors = ['.news_li a', '.news__item a', '.index__news a', 'section a']
-    items = _extract_by_selectors(soup, selectors, ('https://www.thepaper.cn/', 'https://m.thepaper.cn/'), MAX_ITEMS_PER_SOURCE)
-    return items or _parse_generic_links(html, ('https://www.thepaper.cn/','https://m.thepaper.cn/'))
+    items = _extract_by_selectors(soup, selectors, ('https://www.cankaoxiaoxi.com/', 'https://m.cankaoxiaoxi.com.com/'), MAX_ITEMS_PER_SOURCE)
+    return items or _parse_generic_links(html, ('https://www.cankaoxiaoxi.com/','https://m.cankaoxiaoxi.com/'))
 # 财经网
 def parse_caijing(html: str) -> list:
     soup = BeautifulSoup(html, 'lxml')
