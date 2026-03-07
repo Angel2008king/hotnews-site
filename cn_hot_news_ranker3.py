@@ -834,7 +834,8 @@ footer{color:var(--muted);font-size:.85rem;margin-top:28px}
     )
 
     with open(out_fullpath, 'w', encoding='utf-8') as f:
-        f.write(head + "".join(rows) + tail)
+        f.write(head + "
+".join(rows) + tail)
 
 
 # 数据源
