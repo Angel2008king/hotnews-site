@@ -618,7 +618,7 @@ footer{color:var(--muted);font-size:.85rem;margin-top:28px}
         '<a href="https://wap.baidu.com/" target="_blank" rel="noopener noreferrer">百度</a>'
         '</nav></div>'
         '<h1>今日热点新闻</h1>'
-        f'<div class="order">排序：{htmllib.escape(order_label)}；时间范围：最近{max_age_days}天；国际优先：{"是" if intl_first else "否"}</div>'
+##         f'<div class="order">排序：{htmllib.escape(order_label)}；时间范围：最近{max_age_days}天；国际优先：{"是" if intl_first else "否"}</div>'
         f'<div class="ts">生成时间：{now}</div></header><section>'
     )
 
