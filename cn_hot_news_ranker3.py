@@ -57,8 +57,8 @@ INTERNATIONAL_KEYWORDS = [
 SOURCE_WEIGHT = {
     "央视网-新闻频道": 4, "央视网-国内新闻": 2, "新华网-首页": 1,
     "中新网-即时": 4, "中新网-要闻": 1, "中新网-国内": 2, "中新网-社会": 1,
-    "环球网-国内": 3, "网易新闻-国内": 0,
-    "南方都市报": 0, "财经网": 3, "凤凰网": 2, "搜狐新闻": 2,
+    "环球网-国内": 0, "网易新闻-国内": 1,
+    "南方都市报": 2, "财经网": 3, "凤凰网": 5, "搜狐新闻": 2,
 }
 
 UA_POOL = [
@@ -208,11 +208,6 @@ def parse_xinhua(html: str) -> list:
     soup = BeautifulSoup(html, 'lxml')
     selectors = ['section a', '.news a', '.data a', '.headline a', '.list a']
     return _extract_by_selectors(soup, selectors, ('https://www.news.cn/',), MAX_ITEMS_PER_SOURCE)         or _parse_generic_links(html, ('https://www.news.cn/',))
-
-def parse_huanqiu_china(html: str) -> list:
-    soup = BeautifulSoup(html, 'lxml')
-    selectors = ['a[href*="/article/"]', 'section[class*="list"] a', '.list a', '.item a', '.content a']
-    return _extract_by_selectors(soup, selectors, ('https://www.huanqiu.com/','https://china.huanqiu.com/'), MAX_ITEMS_PER_SOURCE)         or _parse_generic_links(html, ('https://www.huanqiu.com/','https://china.huanqiu.com/'))
 
 def parse_net163_domestic(html: str) -> list:
     soup = BeautifulSoup(html, 'lxml')
