@@ -249,7 +249,6 @@ PARSERS = {
     'parse_cctv_index': parse_cctv_index,
     'parse_cctv_china': parse_cctv_china,
     'parse_xinhua': parse_xinhua,
-    'parse_huanqiu_china': parse_huanqiu_china,
     'parse_net163_domestic': parse_net163_domestic,
     'parse_nandu': parse_nandu,
 }
