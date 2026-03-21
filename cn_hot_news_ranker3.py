@@ -1,4 +1,37 @@
-#!/usr/bin/env python3UA_INDEX = 0
+#!/usr/bin/env python3_PROXY") or os.environ.get("https_proxy"),
+        }
+        break
+
+# ===================== 工具函数 =====================
+def set_proxy(proxy: Optional[str]):
+    _session.proxies = {"http": proxy, "https": proxy} if proxy else {}
+
+def normalize_space(s: Optional[str]) -> str:
+    return re.sub(r"\s+", " ", s or "").strip()
+
+def safe_url(u: str) -> str:
+    if not u:
+        return u
+    u = u.replace(" ", "")
+    if u.startswith("//"):
+        u = "https:" + u
+    return u
+
+def strip_html(raw: str) -> str:
+    if not raw:
+        return ""
+    try:
+        soup = BeautifulSoup(raw, "lxml")
+        for tag in soup(["script", "style"]):
+            tag.extract()
+        return normalize_space(soup.get_text(separator=" "))
+    except Exception:
+        t = re.sub(r"<script.*?>.*?</script>", "", raw, flags=re.S | re.I)
+        t = re.sub(r"<style.*?>.*?</style>", "", t, flags=re.S | re.I)
+        t = re.sub(r"<[^>]+>", "", t)
+        return normalize_space(t)
+
+UA_INDEX = 0
 def _rotate_ua():
     global UA_INDEX
     UA_INDEX = (UA_INDEX + 1) % len(UA_POOL)
@@ -273,7 +306,17 @@ def _parse_datetime_str(s: str) -> Optional[dt.datetime]:
     """解析常见日期字符串，返回带时区的 datetime（Asia/Shanghai）。"""
     s = normalize_space(s)
 
-    # 1) 2026-03-21 10:20[:30] / 2026/03/21 10:20[:30] / 仅日期
+    # 1) 2026年3月21日 [10:20[:30]]
+    m = re.search(r"(\d{4})年(\d{1,2})月(\d{1,2})日(?:\s*(\d{1,2}):(\d{2})(?::(\d{2}))?)?", s)
+    if m:
+        y, mo, d = int(m.group(1)), int(m.group(2)), int(m.group(3))
+        hh, mm, ss = int(m.group(4) or 0), int(m.group(5) or 0), int(m.group(6) or 0)
+        try:
+            return dt.datetime(y, mo, d, hh, mm, ss, tzinfo=CN_TZ)
+        except Exception:
+            return None
+
+    # 2) 2026-03-21 / 2026/03/21 [10:20[:30]]
     m = re.search(r"(\d{4})\d{1,2}\d{1,2}(?:\s+(\d{1,2}):(\d{2})(?::(\d{2}))?)?", s)
     if m:
         y, mo, d = int(m.group(1)), int(m.group(2)), int(m.group(3))
@@ -283,18 +326,8 @@ def _parse_datetime_str(s: str) -> Optional[dt.datetime]:
         except Exception:
             return None
 
-    # 2) 20260321 或 20260321 10:20[:30]
+    # 3) 20260321 [10:20[:30]]
     m = re.search(r"(\d{4})(\d{2})(\d{2})(?:\s+(\d{1,2}):(\d{2})(?::(\d{2}))?)?", s)
-    if m:
-        y, mo, d = int(m.group(1)), int(m.group(2)), int(m.group(3))
-        hh, mm, ss = int(m.group(4) or 0), int(m.group(5) or 0), int(m.group(6) or 0)
-        try:
-            return dt.datetime(y, mo, d, hh, mm, ss, tzinfo=CN_TZ)
-        except Exception:
-            return None
-
-    # 3) 2026年3月21日 10:20[:30] / 或仅日期
-    m = re.search(r"(\d{4})年(\d{1,2})月(\d{1,2})日(?:\s*(\d{1,2}):(\d{2})(?::(\d{2}))?)?", s)
     if m:
         y, mo, d = int(m.group(1)), int(m.group(2)), int(m.group(3))
         hh, mm, ss = int(m.group(4) or 0), int(m.group(5) or 0), int(m.group(6) or 0)
@@ -548,7 +581,7 @@ nav.quicklinks{display:flex; gap:28px; justify-content:space-around; align-items
 nav.quicklinks a{color:#0b66d6;text-decoration:none}
 nav.quicklinks a:hover{text-decoration:underline}
 header h1{margin:8px 0 6px 0; font-size:1.6rem; text-align:center}
-header .ts{color:var(--muted);font-size:.9rem;margin-bottom:10px;text-align:center}
+header .ts{color:#666;font-size:.9rem;margin-bottom:10px;text-align:center}
 .idx{display:inline-block;width:36px;color:#888}
 .title a{color:var(--link);text-decoration:none}
 .title a:hover{text-decoration:underline}
@@ -557,7 +590,7 @@ header .ts{color:var(--muted);font-size:.9rem;margin-bottom:10px;text-align:cent
 footer{color:var(--muted);font-size:.85rem;margin-top:28px}
     """.strip()
 
-    # Quicklinks：标准 ...文本</a>
+    # Quicklinks（标准 <a>）
     quicklinks = [
         ("https://wap.weather.com.cn/mweather/", "天气预报"),
         ("https://www.ip138.com/ditie/", "城市地铁"),
@@ -565,7 +598,8 @@ footer{color:var(--muted);font-size:.85rem;margin-top:28px}
         ("https://wap.baidu.com/", "百度"),
     ]
     quicklinks_html = "".join(
-        f"{htmllib.escape(text)}</a>" for href, text in quicklinks
+        f'{htmllib.escape(text)}</a>'
+        for href, text in quicklinks
     )
 
     head = (
@@ -592,7 +626,6 @@ footer{color:var(--muted);font-size:.85rem;margin-top:28px}
         pub = it.get("published") or fmt_pub_time(it) or "—"
         summary = htmllib.escape(it.get("summary_final", "") or it.get("summary", "") or it.get("title", ""))
 
-        # 标题显示为可点击链接（不再露出裸 URL）
         row_html = (
             f"<article class='card'>"
             f"<div class='title'><span class='idx'>{i:02d}.</span>"
@@ -786,6 +819,7 @@ if __name__ == "__main__":
         with open(log_path, "a", encoding="utf-8") as f:
             f.write(f"[{dt.datetime.now(CN_TZ)}] {e}{traceback.format_exc()}")
         print("[异常] 运行出错，已写入日志：", log_path)
+from __future__ import annotations
 # -*- coding: utf-8 -*-
 """
 CN Hot News Ranker — fixed4（国际源增强版，含兼容参数；UI 修复版）
@@ -793,8 +827,8 @@ CN Hot News Ranker — fixed4（国际源增强版，含兼容参数；UI 修复
 - 聚合国内+国际新闻源，生成 index.html
 - 命中 “习近平/总书记/中共中央 …” 的标题/摘要/正文一律过滤
 - 保证前 N 条（默认 5 条）为国际热点
-- 修复：标题不再显示裸 URL；移除“排序/时间范围/国际优先”那一行；Quicklinks 使用标准 <a>
-- 兼容旧 CI：--no-txt / --no-docx 两个无效果参数
+- 修复：标题不再显示裸 URL；移除“排序/时间范围/国际优先”行；Quicklinks 使用标准 <a>
+- 兼容旧 CI：--no-txt / --no-docx（无实际输出，仅为兼容）
 
 用法：
 python cn_hot_news_ranker3.py --html index.html --no-txt --no-docx --outdir .
@@ -881,35 +915,3 @@ for key in ["HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy"]:
     if key in os.environ:
         _session.proxies = {
             "http": os.environ.get("HTTP_PROXY") or os.environ.get("http_proxy"),
-            "https": os.environ.get("HTTPS_PROXY") or os.environ.get("https_proxy"),
-        }
-        break
-
-# ===================== 工具函数 =====================
-def set_proxy(proxy: Optional[str]):
-    _session.proxies = {"http": proxy, "https": proxy} if proxy else {}
-
-def normalize_space(s: Optional[str]) -> str:
-    return re.sub(r"\s+", " ", s or "").strip()
-
-def safe_url(u: str) -> str:
-    if not u:
-        return u
-    u = u.replace(" ", "")
-    if u.startswith("//"):
-        u = "https:" + u
-    return u
-
-def strip_html(raw: str) -> str:
-    if not raw:
-        return ""
-    try:
-        soup = BeautifulSoup(raw, "lxml")
-        for tag in soup(["script", "style"]):
-            tag.extract()
-        return normalize_space(soup.get_text(separator=" "))
-    except Exception:
-        t = re.sub(r"<script.*?>.*?</script>", "", raw, flags=re.S | re.I)
-        t = re.sub(r"<style.*?>.*?</style>", "", t, flags=re.S | re.I)
-        t = re.sub(r"<[^>]+>", "", t)
-        return normalize_space(t)
