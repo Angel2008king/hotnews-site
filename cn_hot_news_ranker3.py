@@ -368,7 +368,7 @@ def _parse_datetime_str(s: str) -> Optional[dt.datetime]:
     if m:
         y, mo, d = int(m.group(1)), int(m.group(2)), int(m.group(3))
         hh = int(m.group(4) or 0); mm = int(m.group(5) or 0); ss = int(m.group(6) or 0)
-        try: return dtmm, ss, tzinfo=CN_TZ)
+        try: return dtmm, ss, tzinfo=CN_TZ
         except Exception: return None
     return None
 
