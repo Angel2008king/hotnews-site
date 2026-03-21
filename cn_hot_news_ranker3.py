@@ -11,7 +11,6 @@ CN Hot News Ranker — fixed4 (国际源增强版，含兼容参数)
 
 使用
 python cn_hot_news_ranker3.py --html index.html --no-txt --no-docx --outdir .
-
 """
 
 import os
@@ -26,6 +25,7 @@ from typing import List, Dict, Tuple, Optional, Any
 
 import requests
 from bs4 import BeautifulSoup
+
 try:
     import feedparser
 except Exception:
@@ -78,14 +78,12 @@ UA_POOL = [
     ("Mozilla/5.0 (X11; Ubuntu; Linux x86_64; rv:122.0) Gecko/20100101 Firefox/122.0"),
 ]
 
-
 def _default_outdir() -> str:
     env = os.environ.get("HOTNEWS_OUTDIR")
     if env:
         return env
     home = os.path.expanduser("~")
     return os.path.join(home, "Hot_Points")
-
 
 OUTPUT_DIR = _default_outdir()
 os.makedirs(OUTPUT_DIR, exist_ok=True)
@@ -104,10 +102,8 @@ for key in ["HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy"]:
 def set_proxy(proxy: Optional[str]):
     _session.proxies = {"http": proxy, "https": proxy} if proxy else {}
 
-
 def normalize_space(s: Optional[str]) -> str:
     return re.sub(r"\s+", " ", s or "").strip()
-
 
 def safe_url(u: str) -> str:
     if not u:
@@ -116,7 +112,6 @@ def safe_url(u: str) -> str:
     if u.startswith("//"):
         u = "https:" + u
     return u
-
 
 def strip_html(raw: str) -> str:
     if not raw:
@@ -132,15 +127,11 @@ def strip_html(raw: str) -> str:
         t = re.sub(r"<[^>]+>", "", t)
         return normalize_space(t)
 
-
 UA_INDEX = 0
-
-
 def _rotate_ua():
     global UA_INDEX
     UA_INDEX = (UA_INDEX + 1) % len(UA_POOL)
     _session.headers.update({"User-Agent": UA_POOL[UA_INDEX]})
-
 
 def get_html(url: str) -> str:
     last = None
@@ -153,8 +144,7 @@ def get_html(url: str) -> str:
                 r.encoding = r.apparent_encoding or r.encoding or "utf-8"
                 return r.text
             elif s in (401, 403):
-                _rotate_ua()
-                last = Exception(f"Forbidden {s}")
+                _rotate_ua(); last = Exception(f"Forbidden {s}")
             elif s in (404,):
                 raise RuntimeError(f"404 Not Found: {url}")
             elif s in (429,):
@@ -169,7 +159,6 @@ def get_html(url: str) -> str:
         delay = min(delay * 1.8, 6.0)
     raise RuntimeError(f"请求失败：{url} 错误：{last}")
 
-
 # ===================== RSS 抓取 =====================
 def fetch_rss(feed_url: str, source_name: str) -> List[Dict[str, Any]]:
     if not feedparser:
@@ -182,25 +171,14 @@ def fetch_rss(feed_url: str, source_name: str) -> List[Dict[str, Any]]:
         if not title or not link:
             continue
         summary = strip_html(getattr(e, "summary", ""))
-        published = normalize_space(getattr(e, "published", "")) or normalize_space(
-            getattr(e, "updated", "")
-        )
-        pub_parsed = getattr(e, "published_parsed", None) or getattr(
-            e, "updated_parsed", None
-        )
-        items.append(
-            {
-                "title": title,
-                "url": link,
-                "summary": summary,
-                "published": published,
-                "published_parsed": pub_parsed,
-                "source": source_name,
-                "via": "rss",
-            }
-        )
+        published = normalize_space(getattr(e, "published", "")) or normalize_space(getattr(e, "updated", ""))
+        pub_parsed = getattr(e, "published_parsed", None) or getattr(e, "updated_parsed", None)
+        items.append({
+            "title": title, "url": link, "summary": summary,
+            "published": published, "published_parsed": pub_parsed,
+            "source": source_name, "via": "rss"
+        })
     return items
-
 
 # ===================== 通用链接抓取 =====================
 def _parse_generic_links(html: str, domain_allow: Tuple[str, ...]) -> List[Dict[str, Any]]:
@@ -222,10 +200,7 @@ def _parse_generic_links(html: str, domain_allow: Tuple[str, ...]) -> List[Dict[
             break
     return out
 
-
-def _extract_by_selectors(
-    soup: BeautifulSoup, selectors: list, domain_allow: tuple, limit: int
-) -> list:
+def _extract_by_selectors(soup: BeautifulSoup, selectors: list, domain_allow: tuple, limit: int) -> list:
     out, seen = [], set()
     for sel in selectors:
         for a in soup.select(sel):
@@ -240,47 +215,37 @@ def _extract_by_selectors(
             key = (title, href)
             if key in seen or len(title) < 6:
                 continue
-            seen.add(key)
-            out.append({"title": title, "url": href})
+            seen.add(key); out.append({"title": title, "url": href})
             if len(out) >= limit:
                 return out
         if len(out) >= limit:
             break
     return out
 
-
 # ===================== 站点解析 =====================
 def parse_cctv_index(html: str) -> list:
     soup = BeautifulSoup(html, "lxml")
     selectors = [".roll_yw a", ".newslist a", ".title_list a", "section a"]
-    return _extract_by_selectors(
-        soup, selectors, ("news.cctv.cn", "news.cctv.com"), MAX_ITEMS_PER_SOURCE
-    ) or _parse_generic_links(html, ("news.cctv.cn", "news.cctv.com"))
-
+    return _extract_by_selectors(soup, selectors, ("news.cctv.cn", "news.cctv.com"), MAX_ITEMS_PER_SOURCE) \
+        or _parse_generic_links(html, ("news.cctv.cn", "news.cctv.com"))
 
 def parse_cctv_china(html: str) -> list:
     soup = BeautifulSoup(html, "lxml")
     selectors = ["#newslist a", ".brecommend a", ".tuwen a", "section a"]
-    return _extract_by_selectors(
-        soup, selectors, ("news.cctv.com/china", "news.cctv.com"), MAX_ITEMS_PER_SOURCE
-    ) or _parse_generic_links(html, ("news.cctv.com/china", "news.cctv.com"))
-
+    return _extract_by_selectors(soup, selectors, ("news.cctv.com/china", "news.cctv.com"), MAX_ITEMS_PER_SOURCE) \
+        or _parse_generic_links(html, ("news.cctv.com/china", "news.cctv.com"))
 
 def parse_xinhua(html: str) -> list:
     soup = BeautifulSoup(html, "lxml")
     selectors = ["section a", ".news a", ".data a", ".headline a", ".list a"]
-    return _extract_by_selectors(
-        soup, selectors, ("www.news.cn",), MAX_ITEMS_PER_SOURCE
-    ) or _parse_generic_links(html, ("www.news.cn",))
-
+    return _extract_by_selectors(soup, selectors, ("www.news.cn",), MAX_ITEMS_PER_SOURCE) \
+        or _parse_generic_links(html, ("www.news.cn",))
 
 def parse_net163_domestic(html: str) -> list:
     soup = BeautifulSoup(html, "lxml")
     selectors = ["#js_D_list a", ".news_default_list a", ".post_item a", "section a"]
-    return _extract_by_selectors(
-        soup, selectors, ("news.163.com", "www.163.com"), MAX_ITEMS_PER_SOURCE
-    ) or _parse_generic_links(html, ("news.163.com", "www.163.com"))
-
+    return _extract_by_selectors(soup, selectors, ("news.163.com", "www.163.com"), MAX_ITEMS_PER_SOURCE) \
+        or _parse_generic_links(html, ("news.163.com", "www.163.com"))
 
 def parse_nandu(html: str) -> list:
     soup = BeautifulSoup(html, "lxml")
@@ -300,9 +265,7 @@ def parse_nandu(html: str) -> list:
             continue
         raw = raw.replace("查看详情", " ")
         raw = re.sub(r"\b\d{4}[-/]\d{1,2}[-/]\d{1,2}\s+\d{1,2}:\d{2}\b", " ", raw)
-        candidates = re.findall(
-            r"[一-龥A-Za-z0-9《》“”‘’·—\-：:、，。,！!？?（）()]{6,}", raw
-        )
+        candidates = re.findall(r"[一-龥A-Za-z0-9《》“”‘’·—\-：:、，。,！!？?（）()]{6,}", raw)
         title = max(candidates, key=len) if candidates else ""
         if href.startswith("/"):
             href = "https://news.southcn.com" + href
@@ -314,8 +277,7 @@ def parse_nandu(html: str) -> list:
             break
     if len(items) < MAX_ITEMS_PER_SOURCE:
         more = _parse_generic_links(
-            html,
-            ("news.southcn.com", "m.nfapp.southcn.com", "www.nandu.com", "www.nandu.com"),
+            html, ("news.southcn.com", "m.nfapp.southcn.com", "www.nandu.com", "www.nandu.com")
         )
         for m in more:
             if all(m["url"] != it["url"] for it in items) and "查看详情" not in m["title"]:
@@ -324,48 +286,37 @@ def parse_nandu(html: str) -> list:
                 break
     return items
 
-
 # —— 国际中文站点解析 ——
 def parse_bbc_chinese(html: str) -> list:
     soup = BeautifulSoup(html, "lxml")
     selectors = [".bbc-15apnto a", ".bbc-uk8dsi a", "a"]
-    return _extract_by_selectors(
-        soup, selectors, ("bbc.com/zhongwen", "bbc.co.uk/zhongwen"), MAX_ITEMS_PER_SOURCE
-    ) or _parse_generic_links(html, ("bbc.com/zhongwen", "bbc.co.uk/zhongwen"))
-
+    return _extract_by_selectors(soup, selectors, ("bbc.com/zhongwen", "bbc.co.uk/zhongwen"), MAX_ITEMS_PER_SOURCE) \
+        or _parse_generic_links(html, ("bbc.com/zhongwen", "bbc.co.uk/zhongwen"))
 
 def parse_rfi_cn(html: str) -> list:
     soup = BeautifulSoup(html, "lxml")
     selectors = [".o-list-ui__links a", ".m-item-list a", "a"]
-    return _extract_by_selectors(
-        soup, selectors, ("rfi.fr/cn",), MAX_ITEMS_PER_SOURCE
-    ) or _parse_generic_links(html, ("rfi.fr/cn",))
-
+    return _extract_by_selectors(soup, selectors, ("rfi.fr/cn",), MAX_ITEMS_PER_SOURCE) \
+        or _parse_generic_links(html, ("rfi.fr/cn",))
 
 def parse_dw_cn(html: str) -> list:
     soup = BeautifulSoup(html, "lxml")
     selectors = [".news a", "a"]
-    return _extract_by_selectors(
-        soup, selectors, ("dw.com/zh", "dw.com/zh-hant"), MAX_ITEMS_PER_SOURCE
-    ) or _parse_generic_links(html, ("dw.com/zh", "dw.com/zh-hant"))
-
+    return _extract_by_selectors(soup, selectors, ("dw.com/zh", "dw.com/zh-hant"), MAX_ITEMS_PER_SOURCE) \
+        or _parse_generic_links(html, ("dw.com/zh", "dw.com/zh-hant"))
 
 # —— 为缺失站点补通用解析（避免 KeyError） ——
 def parse_huanqiu_china(html: str) -> list:
     return _parse_generic_links(html, ("huanqiu.com",))
 
-
 def parse_caijing(html: str) -> list:
     return _parse_generic_links(html, ("caijing.com.cn",))
-
 
 def parse_ifeng(html: str) -> list:
     return _parse_generic_links(html, ("news.ifeng.com",))
 
-
 def parse_sohu_news(html: str) -> list:
     return _parse_generic_links(html, ("news.sohu.com",))
-
 
 PARSERS = {
     "parse_cctv_index": parse_cctv_index,
@@ -405,10 +356,8 @@ def fetch_from_source(name: str, conf: Dict[str, str]) -> List[Dict[str, Any]]:
         print(f"[警告] 来源 {name} 抓取失败：{e}")
         return []
 
-
 def is_excluded_title_or_summary(title: str, summary: str = "") -> bool:
     return bool(EXCLUDE_REGEX.search(f"{title} {summary}"))
-
 
 def dedup_and_group(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     def canon_title(t: str) -> str:
@@ -421,14 +370,9 @@ def dedup_and_group(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         key = canon_title(it["title"])
         if key not in buckets:
             buckets[key] = {
-                "title": key,
-                "url": it["url"],
-                "summary": it.get("summary", ""),
-                "published": it.get("published", ""),
-                "published_parsed": it.get("published_parsed"),
-                "sources": set([it.get("source", "")]),
-                "via": set([it.get("via", "")]),
-                "raw": [it],
+                "title": key, "url": it["url"], "summary": it.get("summary", ""),
+                "published": it.get("published", ""), "published_parsed": it.get("published_parsed"),
+                "sources": set([it.get("source", "")]), "via": set([it.get("via", "")]), "raw": [it]
             }
         else:
             b = buckets[key]
@@ -445,20 +389,13 @@ def dedup_and_group(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
 
     merged: List[Dict[str, Any]] = []
     for _, v in buckets.items():
-        merged.append(
-            {
-                "title": v["title"],
-                "url": v["url"],
-                "summary": v.get("summary", ""),
-                "published": v.get("published", ""),
-                "published_parsed": v.get("published_parsed"),
-                "sources": sorted([s for s in v["sources"] if s]),
-                "via_list": sorted([s for s in v["via"] if s]),
-                "raw": v["raw"],
-            }
-        )
+        merged.append({
+            "title": v["title"], "url": v["url"], "summary": v.get("summary", ""),
+            "published": v.get("published", ""), "published_parsed": v.get("published_parsed"),
+            "sources": sorted([s for s in v["sources"] if s]),
+            "via_list": sorted([s for s in v["via"] if s]), "raw": v["raw"]
+        })
     return merged
-
 
 # ===================== 时间解析与正文摘要 =====================
 def _parse_datetime_str(s: str) -> Optional[dt.datetime]:
@@ -467,12 +404,12 @@ def _parse_datetime_str(s: str) -> Optional[dt.datetime]:
 
     # 1) 2026-03-21 10:20[:30] 或 2026/03/21 10:20[:30] 或仅日期
     m = re.search(
-        r"(\d{4})[-/](\d{1,2})[-/](\d{1,2})(?:\s+(\d{1,2}):(\d{2})(?::(\d{2}))?)?",
+        r"(\d{4})\d{1,2}\d{1,2}(?:\s+(\d{1,2}):(\d{2})(?::(\d{2}))?)?",
         s,
     )
     if m:
-        y, mo, d = int(m[1]), int(m[2]), int(m[3])
-        hh, mm, ss = int(m[4] or 0), int(m[5] or 0), int(m[6] or 0)
+        y, mo, d = int(m.group(1)), int(m.group(2)), int(m.group(3))
+        hh, mm, ss = int(m.group(4) or 0), int(m.group(5) or 0), int(m.group(6) or 0)
         try:
             return dt.datetime(y, mo, d, hh, mm, ss, tzinfo=CN_TZ)
         except Exception:
@@ -484,7 +421,8 @@ def _parse_datetime_str(s: str) -> Optional[dt.datetime]:
         s,
     )
     if m:
-        y, mo, d = int(m[1]), int(m[2]), int(m hh, mm, ss = int(m[4] or 0), int(m[5] or 0), int(m[6] or 0)
+        y, mo, d = int(m.group(1)), int(m.group(2)), int(m.group(3))
+        hh, mm, ss = int(m.group(4) or 0), int(m.group(5) or 0), int(m.group(6) or 0)
         try:
             return dt.datetime(y, mo, d, hh, mm, ss, tzinfo=CN_TZ)
         except Exception:
@@ -496,15 +434,14 @@ def _parse_datetime_str(s: str) -> Optional[dt.datetime]:
         s,
     )
     if m:
-        y, mo, d = int(m[1]), int(m[2]), int(m[3])
-        hh, mm, ss = int(m[4] or 0), int(m[5] or 0), int(m[6] or 0)
+        y, mo, d = int(m.group(1)), int(m.group(2)), int(m.group(3))
+        hh, mm, ss = int(m.group(4) or 0), int(m.group(5) or 0), int(m.group(6) or 0)
         try:
             return dt.datetime(y, mo, d, hh, mm, ss, tzinfo=CN_TZ)
         except Exception:
             return None
 
     return None
-
 
 def _try_iso_or_rfc(s: str) -> Optional[dt.datetime]:
     s = normalize_space(s)
@@ -528,7 +465,6 @@ def _try_iso_or_rfc(s: str) -> Optional[dt.datetime]:
     except Exception:
         return None
 
-
 def fetch_page_summary_and_time(url: str):
     summary = ""
     pub_text = None
@@ -542,10 +478,8 @@ def fetch_page_summary_and_time(url: str):
         pub_text, pub_parsed = extract_publish_time(html, url)
         soup = BeautifulSoup(html, "lxml")
         for sel in [
-            'meta[name="description"]',
-            'meta[name="Description"]',
-            'meta[property="og:description"]',
-            'meta[name="og:description"]',
+            'meta[name="description"]', 'meta[name="Description"]',
+            'meta[property="og:description"]', 'meta[name="og:description"]'
         ]:
             tag = soup.select_one(sel)
             if tag and tag.get("content"):
@@ -561,19 +495,15 @@ def fetch_page_summary_and_time(url: str):
         pass
     return (summary, pub_text, pub_parsed, content_hit_excluded)
 
-
 def extract_publish_time(html: str, url: str):
     soup = BeautifulSoup(html, "lxml")
     # 常见 meta
-    xw_meta = soup.find("meta", attrs={"name": "pubdate"}) or soup.find(
-        "meta", attrs={"name": "publishdate"}
-    )
+    xw_meta = soup.find("meta", attrs={"name": "pubdate"}) or soup.find("meta", attrs={"name": "publishdate"})
     if xw_meta and xw_meta.get("content"):
         raw = normalize_space(xw_meta.get("content"))
         d = _parse_datetime_str(raw) or _try_iso_or_rfc(raw)
         if d:
             return (raw, d.timetuple())
-
     # 常见标签
     tag = soup.select_one("#pubtime") or soup.select_one(".header-info .time")
     if tag:
@@ -581,14 +511,9 @@ def extract_publish_time(html: str, url: str):
         d = _parse_datetime_str(raw)
         if d:
             return (raw, d.timetuple())
-
     # 163 特例
     if any(x in url for x in ("news.163.com", "www.163.com")):
-        ptime = (
-            soup.select_one("#ptime")
-            or soup.select_one(".post_time_source")
-            or soup.select_one(".post_info")
-        )
+        ptime = soup.select_one("#ptime") or soup.select_one(".post_time_source") or soup.select_one(".post_info")
         if ptime:
             raw = normalize_space(ptime.get_text())
             d = _parse_datetime_str(raw)
@@ -600,7 +525,6 @@ def extract_publish_time(html: str, url: str):
             d = _parse_datetime_str(raw) or _try_iso_or_rfc(raw)
             if d:
                 return (raw, d.timetuple())
-
     # southcn
     if "southcn.com" in url:
         cand = soup.select_one(".pub-time, .time, .info .time")
@@ -609,7 +533,6 @@ def extract_publish_time(html: str, url: str):
             d = _parse_datetime_str(raw) or _try_iso_or_rfc(raw)
             if d:
                 return (raw, d.timetuple())
-
     # 更多 meta 线索
     for tag_name, attrs, key in [
         ("meta", {"property": "article:published_time"}, "content"),
@@ -625,7 +548,6 @@ def extract_publish_time(html: str, url: str):
             d = _parse_datetime_str(raw) or _try_iso_or_rfc(raw)
             if d:
                 return (raw, d.timetuple())
-
     # ld+json
     for node in soup.select('script[type="application/ld+json"]'):
         try:
@@ -639,7 +561,6 @@ def extract_publish_time(html: str, url: str):
                         return (raw, d.timetuple())
         except Exception:
             pass
-
     # <time> 标签
     t = soup.find("time")
     if t:
@@ -649,19 +570,16 @@ def extract_publish_time(html: str, url: str):
             d = _parse_datetime_str(raw) or _try_iso_or_rfc(raw)
             if d:
                 return (raw, d.timetuple())
-
-    # 全文兜底搜索
+    # 全文兜底
     body = soup.get_text(separator=" ", strip=True)
-    m = re.search(
-        r"(\d{4})年(\d{1,2})月(\d{1,2})日\s+(\d{1,2}):(\d{2})(?::(\d{2}))?", body
-    ) or re.search(r"(\d{4})(\d{2})(\d{2})", body)
+    m = re.search(r"(\d{4})年(\d{1,2})月(\d{1,2})日\s+(\d{1,2}):(\d{2})(?::(\d{2}))?", body) \
+        or re.search(r"(\d{4})(\d{2})(\d{2})", body)
     if m:
         raw = m.group(0)
         d = _parse_datetime_str(raw) or _try_iso_or_rfc(raw)
         if d:
             return (raw, d.timetuple())
-
-    # URL 中的日期
+    # URL 兜底
     m = re.search(r"(\d{4})(\d{2})(\d{2})", url) or re.search(r"(\d{4})\d{2}\d{2}", url)
     if m:
         try:
@@ -669,9 +587,7 @@ def extract_publish_time(html: str, url: str):
             return (None, dtt.timetuple())
         except Exception:
             pass
-
     return (None, None)
-
 
 # ===================== 排序与导出 =====================
 def score_item(it: Dict[str, Any]) -> float:
@@ -704,14 +620,11 @@ def score_item(it: Dict[str, Any]) -> float:
             pass
     return score
 
-
 def order_by_time_desc(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     def keyfunc(it):
         pp = it.get("published_parsed")
         if not pp:
-            m = re.search(r"(\d{4})(\d{2})(\d{2})", it.get("url", "")) or re.search(
-                r"(\d{4})\d{2}\d{2}", it.get("url", "")
-            )
+            m = re.search(r"(\d{4})(\d{2})(\d{2})", it.get("url", "")) or re.search(r"(\d{4})\d{2}\d{2}", it.get("url", ""))
             if m:
                 try:
                     return dt.datetime(int(m.group(1)), int(m.group(2)), int(m.group(3)), tzinfo=CN_TZ)
@@ -727,20 +640,16 @@ def order_by_time_desc(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
             return d
         except Exception:
             return dt.datetime.min.replace(tzinfo=CN_TZ)
-
     return sorted(items, key=keyfunc, reverse=True)
-
 
 def rank_items(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     return sorted(items, key=score_item, reverse=True)
-
 
 def is_international(it: Dict[str, Any]) -> bool:
     txt = (it.get("title", "") + " " + it.get("summary_final", "") + " " + it.get("summary", ""))
     intl_hit = any(k in txt for k in INTERNATIONAL_KEYWORDS)
     local_block = any(k in txt for k in ["中国", "全国", "广东", "广州", "深圳", "珠三角", "两会"])
     return bool(intl_hit and not local_block)
-
 
 def intl_first_merge_with_topk(base_sorted: List[Dict[str, Any]], top_k: int = 5) -> List[Dict[str, Any]]:
     intl = [it for it in base_sorted if is_international(it)]
@@ -749,7 +658,6 @@ def intl_first_merge_with_topk(base_sorted: List[Dict[str, Any]], top_k: int = 5
     if len(head) < top_k:
         print(f"[提示] 国际热点仅 {len(head)} 条，未达到指定的 {top_k} 条，将尽量置顶。")
     return head + intl[top_k:] + other
-
 
 def fmt_pub_time(it):
     if it.get("published_parsed"):
@@ -763,7 +671,6 @@ def fmt_pub_time(it):
         except Exception:
             return it.get("published", "")
     return it.get("published", "")
-
 
 def save_to_html(items: List[Dict[str, Any]], out_fullpath: str, order_label: str, max_age_days: int, intl_first: bool):
     now = dt.datetime.now(CN_TZ).strftime("%Y-%m-%d %H:%M")
@@ -780,7 +687,7 @@ nav.quicklinks a{color:#0b66d6;text-decoration:none}
 nav.quicklinks a:hover{text-decoration:underline}
 header h1{margin:8px 0 6px 0; font-size:1.6rem; text-align:center}
 header .ts{color:var(--muted);font-size:.9rem;margin-bottom:6px}
-header .order{color:#374151;font-size:.9rem;text-align:center;margin-bottom:6px}
+header .order{color:var(--fg);font-size:.9rem;text-align:center;margin-bottom:6px}
 .idx{display:inline-block;width:36px;color:#888}
 .title a{color:var(--link);text-decoration:none}
 .title a:hover{text-decoration:underline}
@@ -789,12 +696,16 @@ header .order{color:#374151;font-size:.9rem;text-align:center;margin-bottom:6px}
 footer{color:var(--muted);font-size:.85rem;margin-top:28px}
     """.strip()
 
-    quicklinks_html = "".join([
-        'https://wap.weather.com.cn/mweather/天气预报</a>',
-        'https://www.ip138.com/ditie/城市地铁</a>',
-        'https://m.hao268.com/网址之家</a>',
-        'https://wap.baidu.com/百度</a>',
-    ])
+    quicklinks = [
+        ("https://wap.weather.com.cn/mweather/", "天气预报"),
+        ("https://www.ip138.com/ditie/", "城市地铁"),
+        ("https://m.hao268.com/", "网址之家"),
+        ("https://wap.baidu.com/", "百度"),
+    ]
+    quicklinks_html = "".join(
+        f"{u}{t}</a>"
+        for u, t in quicklinks
+    )
 
     head = (
         '<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"/>'
@@ -805,7 +716,7 @@ footer{color:var(--muted);font-size:.85rem;margin-top:28px}
         '<div class="wrap"><header>'
         '<div class="card quickcard">'
         '<div class="quickcard-title">便捷小链接</div>'
-        '<nav class="quicklinks">' + quicklinks_html + '</nav></div>'
+        f'<nav class="quicklinks">{quicklinks_html}</nav></div>'
         '<h1>今日热点新闻</h1>'
         f'<div class="order">排序：{htmllib.escape(order_label)}；时间范围：最近{max_age_days}天；国际优先：{"是" if intl_first else "否"}</div>'
         f'<div class="ts">生成时间：{now}</div></header><section>'
@@ -818,16 +729,12 @@ footer{color:var(--muted);font-size:.85rem;margin-top:28px}
         srcs = "、".join(it.get("sources", [])) or "未知"
         pub = it.get("published") or fmt_pub_time(it) or "—"
         summary = htmllib.escape(it.get("summary_final", "") or it.get("summary", "") or it["title"])
-        # 正确的 <a> 链接
-        row_html = (
-            "<article class='card'>"
-            "<div class='title'><span class='idx'>{:02d}.</span>"
-            "{url}{title}</a></div>"
-            "<div class='meta'>来源：{srcs}；日期：{pub}</div>"
-            "<div class='sum'>摘要：{summary}</div>"
-            "</article>"
-        ).format(i, url=url, title=title, srcs=htmllib.escape(srcs), pub=htmllib.escape(pub), summary=summary)
-        rows.append(row_html)
+        rows.append(
+            f"<article class='card'><div class='title'><span class='idx'>{i:02d}.</span>"
+            f"{url}{title}</a></div>"
+            f"<div class='meta'>来源：{htmllib.escape(srcs)}；日期：{htmllib.escape(pub)}</div>"
+            f"<div class='sum'>摘要：{summary}</div></article>"
+        )
 
     tail = (
         "</section><footer>本站每小时自动刷新一次；仅做信息聚合与索引，内容以源站为准。"
@@ -837,10 +744,8 @@ footer{color:var(--muted);font-size:.85rem;margin-top:28px}
     with open(out_fullpath, "w", encoding="utf-8") as f:
         f.write(head + "".join(rows) + tail)
 
-
 # ===================== 数据源（含国际源） =====================
 SOURCES: List[Tuple[str, Dict[str, str]]] = [
-    # 国际
     ("BBC 中文", {
         "rss": "https://www.bbc.co.uk/zhongwen/simp/index.xml",
         "html": "https://www.bbc.com/zhongwen/simp",
@@ -859,7 +764,6 @@ SOURCES: List[Tuple[str, Dict[str, str]]] = [
     }),
     ("CNN World", {"rss": "http://rss.cnn.com/rss/cnn_world.rss"}),
 
-    # 国内
     ("中新网-即时", {"rss": "https://www.chinanews.com.cn/rss/scroll-news.xml"}),
     ("中新网-要闻", {"rss": "https://www.chinanews.com.cn/rss/importnews.xml"}),
     ("中新网-国内", {"rss": "https://www.chinanews.com.cn/rss/china.xml"}),
@@ -875,70 +779,7 @@ SOURCES: List[Tuple[str, Dict[str, str]]] = [
     ("搜狐新闻", {"rss": "https://rss.news.sohu.com/rss/guonei.xml", "html": "https://news.sohu.com/", "parser": "parse_sohu_news"}),
 ]
 
-
 # ===================== 主入口 =====================
-def main():
-    parser = argparse.ArgumentParser(description="CN Hot News Ranker — fixed4 (intl enhanced + compat flags)")
-    # —— 兼容旧版 CI（无实际作用）——
-    parser.add_argument("--no-txt", action="store_true", help="兼容旧版参数（无效果）")
-    parser.add_argument("--no-docx", action="store_true", help="兼容旧版参数（无效果）")
-
-    parser.add_argument("--html", default=None)
-    parser.add_argument("--outdir", default=OUTPUT_DIR)
-    parser.add_argument("--proxy", default=None)
-    parser.add_argument("--order", choices=["time", "score"], default="time")
-    parser.add_argument("--max-age-days", type=int, default=31, help="仅保留最近N天内的新闻；设为0不限制")
-    parser.add_argument("--drop-no-time", action="store_true", help="丢弃无法解析出发布时间的条目")
-    parser.add_argument("--intl-first", action="store_true", default=True, help="国际热点置顶显示（默认开启）")
-    parser.add_argument("--top-intl", type=int, default=5, help="保证置顶的国际热点条数（默认5）")
-    args = parser.parse_args()
-
-    if args.proxy:
-        set_proxy(args.proxy)
-    os.makedirs(args.outdir, exist_ok=True)
-
-    print("=== 中国热点新闻（HTML版）fixed4 国际源增强 (兼容旧参数) 运行 ===")
-    print("输出目录：", args.outdir)
-    if _session.proxies:
-        print("代理：", _session.proxies)
-
-    raw: List[Dict[str, Any]] = []
-    failed: List[str] = []
-
-    for name, conf in SOURCES:
-        time.sleep(SLEEP_BETWEEN)
-        print(f"[抓取] {name} … ", end="")
-        data = fetch_from_source(name, conf)
-        if not data:
-            failed.append(name)
-        before = len(data)
-        data = [
-            d for d in data
-            if not is_excluded_title_or_summary(d.get("title", ""), d.get("summary", ""))
-        ]
-        after = len(data)
-        print(f"获取 {before}，标题/摘要过滤后 {after}")
-        raw.extend(data)
-
-    print(f"[汇总] 原始合计 {len(raw)} 条；去重合并 …")
-    merged = dedup_and_group(raw)
-
-    print("[摘要] 生成摘要 + 补齐时间 + 正文过滤 …")
-    attach_summaries(merged := merged, max_age_days=args.max_age_days, drop_no_time=args.drop_no_time)
-
-    print(f"[排序] 模式：{args.order} …")
-    base_sorted = order_by_time_desc(merged) if args.order == "time" else rank_items(merged)
-
-    ordered = intl_first_merge_with_topk(base_sorted, top_k=args.top_intl) if args.intl_first else base_sorted
-    topn = ordered[:TOP_N]
-
-    html_path = args.html or os.path.join(args.outdir, "index.html")
-    save_to_html(topn, html_path, "时间（新→旧）" if args.order == "time" else "热度评分", args.max_age_days, args.intl_first)
-    print("[完成] HTML:", html_path)
-    if failed:
-        print("[提示] 以下来源本次未获取到数据：", "、".join(failed))
-
-
 def attach_summaries(items: List[Dict[str, Any]], max_age_days: int = 31, drop_no_time: bool = False) -> None:
     now_year = dt.datetime.now(CN_TZ).year
     keep: List[Dict[str, Any]] = []
@@ -1009,6 +850,63 @@ def attach_summaries(items: List[Dict[str, Any]], max_age_days: int = 31, drop_n
     items.clear()
     items.extend(keep)
 
+def main():
+    parser = argparse.ArgumentParser(description="CN Hot News Ranker — fixed4 (intl enhanced + compat flags)")
+    # —— 兼容旧版 CI（无实际作用）——
+    parser.add_argument("--no-txt", action="store_true", help="兼容旧版参数（无效果）")
+    parser.add_argument("--no-docx", action="store_true", help="兼容旧版参数（无效果）")
+    # —— 正常参数 ——
+    parser.add_argument("--html", default=None)
+    parser.add_argument("--outdir", default=OUTPUT_DIR)
+    parser.add_argument("--proxy", default=None)
+    parser.add_argument("--order", choices=["time", "score"], default="time")
+    parser.add_argument("--max-age-days", type=int, default=31, help="仅保留最近N天内的新闻；设为0不限制")
+    parser.add_argument("--drop-no-time", action="store_true", help="丢弃无法解析出发布时间的条目")
+    parser.add_argument("--intl-first", action="store_true", default=True, help="国际热点置顶显示（默认开启）")
+    parser.add_argument("--top-intl", type=int, default=5, help="保证置顶的国际热点条数（默认5）")
+    args = parser.parse_args()
+
+    if args.proxy:
+        set_proxy(args.proxy)
+    os.makedirs(args.outdir, exist_ok=True)
+
+    print("=== 中国热点新闻（HTML版）fixed4 国际源增强 (兼容旧参数) 运行 ===")
+    print("输出目录：", args.outdir)
+    if _session.proxies:
+        print("代理：", _session.proxies)
+
+    raw: List[Dict[str, Any]] = []
+    failed: List[str] = []
+
+    for name, conf in SOURCES:
+        time.sleep(SLEEP_BETWEEN)
+        print(f"[抓取] {name} … ", end="")
+        data = fetch_from_source(name, conf)
+        if not data:
+            failed.append(name)
+        before = len(data)
+        data = [d for d in data if not is_excluded_title_or_summary(d.get("title", ""), d.get("summary", ""))]
+        after = len(data)
+        print(f"获取 {before}，标题/摘要过滤后 {after}")
+        raw.extend(data)
+
+    print(f"[汇总] 原始合计 {len(raw)} 条；去重合并 …")
+    merged = dedup_and_group(raw)
+
+    print("[摘要] 生成摘要 + 补齐时间 + 正文过滤 …")
+    attach_summaries(merged, max_age_days=args.max_age_days, drop_no_time=args.drop_no_time)
+
+    print(f"[排序] 模式：{args.order} …")
+    base_sorted = order_by_time_desc(merged) if args.order == "time" else rank_items(merged)
+
+    ordered = intl_first_merge_with_topk(base_sorted, top_k=args.top_intl) if args.intl_first else base_sorted
+    topn = ordered[:TOP_N]
+
+    html_path = args.html or os.path.join(args.outdir, "index.html")
+    save_to_html(topn, html_path, "时间（新→旧）" if args.order == "time" else "热度评分", args.max_age_days, args.intl_first)
+    print("[完成] HTML:", html_path)
+    if failed:
+        print("[提示] 以下来源本次未获取到数据：", "、".join(failed))
 
 if __name__ == "__main__":
     import traceback
