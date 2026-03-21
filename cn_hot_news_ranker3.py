@@ -1,4 +1,8 @@
-#!/usr/bin/env python3_PROXY") or os.environ.get("https_proxy"),
+#!/usr/bin/env python3"]:
+    if key in os.environ:
+        _session.proxies = {
+            "http": os.environ.get("HTTP_PROXY") or os.environ.get("http_proxy"),
+            "https": os.environ.get("HTTPS_PROXY") or os.environ.get("https_proxy"),
         }
         break
 
@@ -317,7 +321,7 @@ def _parse_datetime_str(s: str) -> Optional[dt.datetime]:
             return None
 
     # 2) 2026-03-21 / 2026/03/21 [10:20[:30]]
-    m = re.search(r"(\d{4})\d{1,2}\d{1,2}(?:\s+(\d{1,2}):(\d{2})(?::(\d{2}))?)?", s)
+    m = re.search(r"(\d{4})\d{1,2}\d{1,2}(?:\d{1,2}:(\d{2})(?::(\d{2}))?)?", s)
     if m:
         y, mo, d = int(m.group(1)), int(m.group(2)), int(m.group(3))
         hh, mm, ss = int(m.group(4) or 0), int(m.group(5) or 0), int(m.group(6) or 0)
@@ -327,7 +331,7 @@ def _parse_datetime_str(s: str) -> Optional[dt.datetime]:
             return None
 
     # 3) 20260321 [10:20[:30]]
-    m = re.search(r"(\d{4})(\d{2})(\d{2})(?:\s+(\d{1,2}):(\d{2})(?::(\d{2}))?)?", s)
+    m = re.search(r"(\d{4})(\d{2})(\d{2})(?:\d{1,2}:(\d{2})(?::(\d{2}))?)?", s)
     if m:
         y, mo, d = int(m.group(1)), int(m.group(2)), int(m.group(3))
         hh, mm, ss = int(m.group(4) or 0), int(m.group(5) or 0), int(m.group(6) or 0)
@@ -598,7 +602,7 @@ footer{color:var(--muted);font-size:.85rem;margin-top:28px}
         ("https://wap.baidu.com/", "百度"),
     ]
     quicklinks_html = "".join(
-        f'{htmllib.escape(text)}</a>'
+        f'{htmllib.escape(href)}{htmllib.escape(text)}</a>'
         for href, text in quicklinks
     )
 
@@ -616,7 +620,7 @@ footer{color:var(--muted);font-size:.85rem;margin-top:28px}
         f'<div class="ts">生成时间：{now}</div>'
         '</header><section>'
     )
-    # 说明：这里已删除“排序/时间范围/国际优先”的说明行
+    # 注意：这里已删除“排序/时间范围/国际优先”的说明行
 
     rows: List[str] = []
     for i, it in enumerate(items, 1):
@@ -629,7 +633,7 @@ footer{color:var(--muted);font-size:.85rem;margin-top:28px}
         row_html = (
             f"<article class='card'>"
             f"<div class='title'><span class='idx'>{i:02d}.</span>"
-            f"{url}\" target=\"_blank\" rel=\"noopener\">{title}</a></div>"
+            f"<a href=\"{url}\" target=\"_blank\" rel=\"noopener\">{title}</a></div>"
             f"<div class='meta'>来源：{htmllib.escape(srcs)}；日期：{htmllib.escape(pub)}</div>"
             f"<div class='sum'>摘要：{summary}</div>"
             f"</article>"
@@ -753,7 +757,7 @@ def attach_summaries(items: List[Dict[str, Any]], max_age_days: int = 31, drop_n
     items.extend(keep)
 
 def main():
-    parser = argparse.ArgumentParser(description="CN Hot News Ranker — fixed4 (intl enhanced + compat flags + UI fix)")
+    parser = argparse.ArgumentParser(description="CN Hot News Ranker — fixed4 (intl + UI + compat)")
     # —— 兼容旧版 CI（无实际作用）——
     parser.add_argument("--no-txt", action="store_true", help="兼容旧版参数（无效果）")
     parser.add_argument("--no-docx", action="store_true", help="兼容旧版参数（无效果）")
@@ -819,16 +823,15 @@ if __name__ == "__main__":
         with open(log_path, "a", encoding="utf-8") as f:
             f.write(f"[{dt.datetime.now(CN_TZ)}] {e}{traceback.format_exc()}")
         print("[异常] 运行出错，已写入日志：", log_path)
-from __future__ import annotations
 # -*- coding: utf-8 -*-
 """
-CN Hot News Ranker — fixed4（国际源增强版，含兼容参数；UI 修复版）
+CN Hot News Ranker — fixed4（国际源增强 + UI 修复 + CI 兼容）
 
-- 聚合国内+国际新闻源，生成 index.html
-- 命中 “习近平/总书记/中共中央 …” 的标题/摘要/正文一律过滤
+- 聚合国内+国际新闻源（RSS + HTML 兜底），生成 index.html
+- 命中“习近平/总书记/中共中央 …”的标题/摘要/正文一律过滤
 - 保证前 N 条（默认 5 条）为国际热点
 - 修复：标题不再显示裸 URL；移除“排序/时间范围/国际优先”行；Quicklinks 使用标准 <a>
-- 兼容旧 CI：--no-txt / --no-docx（无实际输出，仅为兼容）
+- 兼容旧 CI：--no-txt / --no-docx（无实际输出）
 
 用法：
 python cn_hot_news_ranker3.py --html index.html --no-txt --no-docx --outdir .
@@ -894,9 +897,9 @@ SOURCE_WEIGHT = {
 }
 
 UA_POOL = [
-    ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0 Safari/537.36"),
-    ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15"),
-    ("Mozilla/5.0 (X11; Ubuntu; Linux x86_64; rv:122.0) Gecko/20100101 Firefox/122.0"),
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0 Safari/537.36",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15",
+    "Mozilla/5.0 (X11; Ubuntu; Linux x86_64; rv:122.0) Gecko/20100101 Firefox/122.0",
 ]
 
 def _default_outdir() -> str:
@@ -911,7 +914,3 @@ os.makedirs(OUTPUT_DIR, exist_ok=True)
 
 _session = requests.Session()
 _session.headers.update({"User-Agent": UA_POOL[0]})
-for key in ["HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy"]:
-    if key in os.environ:
-        _session.proxies = {
-            "http": os.environ.get("HTTP_PROXY") or os.environ.get("http_proxy"),
