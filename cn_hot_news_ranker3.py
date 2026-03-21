@@ -1,36 +1,4 @@
-#!/usr/bin/env python3"]:
-    if key in os.environ:
-        _session.proxies = {
-            "http": os.environ.get("HTTP_PROXY") or os.environ.get("http_proxy"),
-            "https": os.environ.get("HTTPS_PROXY") or os.environ.get("https_proxy"),
-        }
-        break
-
-# ===================== 工具函数 =====================
-def set_proxy(proxy: Optional[str]):
-    _session.proxies = {"http": proxy, "https": proxy} if proxy else {}
-
-def normalize_space(s: Optional[str]) -> str:
-    return re.sub(r"\s+", " ", s or "").strip()
-
-def safe_url(u: str) -> str:
-    if not u:
-        return u
-    u = u.replace(" ", "")
-    if u.startswith("//"):
-        u = "https:" + u
-    return u
-
-def strip_html(raw: str) -> str:
-    if not raw:
-        return ""
-    try:
-        soup = BeautifulSoup(raw, "lxml")
-        for tag in soup(["script", "style"]):
-            tag.extract()
-        return normalize_space(soup.get_text(separator=" "))
-    except Exception:
-        t = re.sub(r"<script.*?>.*?</script>", "", raw, flags=re.S | re.I)
+#!/usr/bin/env python3        t = re.sub(r"<script.*?>.*?</script>", "", raw, flags=re.S | re.I)
         t = re.sub(r"<style.*?>.*?</style>", "", t, flags=re.S | re.I)
         t = re.sub(r"<[^>]+>", "", t)
         return normalize_space(t)
@@ -310,17 +278,7 @@ def _parse_datetime_str(s: str) -> Optional[dt.datetime]:
     """解析常见日期字符串，返回带时区的 datetime（Asia/Shanghai）。"""
     s = normalize_space(s)
 
-    # 1) 2026年3月21日 [10:20[:30]]
-    m = re.search(r"(\d{4})年(\d{1,2})月(\d{1,2})日(?:\s*(\d{1,2}):(\d{2})(?::(\d{2}))?)?", s)
-    if m:
-        y, mo, d = int(m.group(1)), int(m.group(2)), int(m.group(3))
-        hh, mm, ss = int(m.group(4) or 0), int(m.group(5) or 0), int(m.group(6) or 0)
-        try:
-            return dt.datetime(y, mo, d, hh, mm, ss, tzinfo=CN_TZ)
-        except Exception:
-            return None
-
-    # 2) 2026-03-21 / 2026/03/21 [10:20[:30]]
+    # 1) 2026-03-21 / 2026/03/21 [10:20[:30]]
     m = re.search(r"(\d{4})\d{1,2}\d{1,2}(?:\d{1,2}:(\d{2})(?::(\d{2}))?)?", s)
     if m:
         y, mo, d = int(m.group(1)), int(m.group(2)), int(m.group(3))
@@ -330,8 +288,18 @@ def _parse_datetime_str(s: str) -> Optional[dt.datetime]:
         except Exception:
             return None
 
-    # 3) 20260321 [10:20[:30]]
-    m = re.search(r"(\d{4})(\d{2})(\d{2})(?:\d{1,2}:(\d{2})(?::(\d{2}))?)?", s)
+    # 2) 20260321 [10:20[:30]]
+    m = re.search(r"(\d{4})(\d{2})(\d{2})(?:\s+(\d{1,2}):(\d{2})(?::(\d{2}))?)?", s)
+    if m:
+        y, mo, d = int(m.group(1)), int(m.group(2)), int(m.group(3))
+        hh, mm, ss = int(m.group(4) or 0), int(m.group(5) or 0), int(m.group(6) or 0)
+        try:
+            return dt.datetime(y, mo, d, hh, mm, ss, tzinfo=CN_TZ)
+        except Exception:
+            return None
+
+    # 3) 2026年3月21日 [10:20[:30]]
+    m = re.search(r"(\d{4})年(\d{1,2})月(\d{1,2})日(?:\s*(\d{1,2}):(\d{2})(?::(\d{2}))?)?", s)
     if m:
         y, mo, d = int(m.group(1)), int(m.group(2)), int(m.group(3))
         hh, mm, ss = int(m.group(4) or 0), int(m.group(5) or 0), int(m.group(6) or 0)
@@ -620,7 +588,7 @@ footer{color:var(--muted);font-size:.85rem;margin-top:28px}
         f'<div class="ts">生成时间：{now}</div>'
         '</header><section>'
     )
-    # 注意：这里已删除“排序/时间范围/国际优先”的说明行
+    # 说明：这里已删除“排序/时间范围/国际优先”的说明行
 
     rows: List[str] = []
     for i, it in enumerate(items, 1):
@@ -827,11 +795,11 @@ if __name__ == "__main__":
 """
 CN Hot News Ranker — fixed4（国际源增强 + UI 修复 + CI 兼容）
 
-- 聚合国内+国际新闻源（RSS + HTML 兜底），生成 index.html
-- 命中“习近平/总书记/中共中央 …”的标题/摘要/正文一律过滤
+- 聚合国内 + 国际新闻源（RSS + HTML 兜底），生成 index.html
+- 命中 “习近平/总书记/中共中央 …” 的标题/摘要/正文一律过滤
 - 保证前 N 条（默认 5 条）为国际热点
-- 修复：标题不再显示裸 URL；移除“排序/时间范围/国际优先”行；Quicklinks 使用标准 <a>
-- 兼容旧 CI：--no-txt / --no-docx（无实际输出）
+- UI：标题以可点击文字呈现（不再裸露 URL）；删除“排序/时间范围/国际优先”行；Quicklinks 为标准 <a>
+- 兼容旧 CI：--no-txt / --no-docx 两个无效果参数
 
 用法：
 python cn_hot_news_ranker3.py --html index.html --no-txt --no-docx --outdir .
@@ -914,3 +882,35 @@ os.makedirs(OUTPUT_DIR, exist_ok=True)
 
 _session = requests.Session()
 _session.headers.update({"User-Agent": UA_POOL[0]})
+for key in ["HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy"]:
+    if key in os.environ:
+        _session.proxies = {
+            "http": os.environ.get("HTTP_PROXY") or os.environ.get("http_proxy"),
+            "https": os.environ.get("HTTPS_PROXY") or os.environ.get("https_proxy"),
+        }
+        break
+
+# ===================== 工具函数 =====================
+def set_proxy(proxy: Optional[str]):
+    _session.proxies = {"http": proxy, "https": proxy} if proxy else {}
+
+def normalize_space(s: Optional[str]) -> str:
+    return re.sub(r"\s+", " ", s or "").strip()
+
+def safe_url(u: str) -> str:
+    if not u:
+        return u
+    u = u.replace(" ", "")
+    if u.startswith("//"):
+        u = "https:" + u
+    return u
+
+def strip_html(raw: str) -> str:
+    if not raw:
+        return ""
+    try:
+        soup = BeautifulSoup(raw, "lxml")
+        for tag in soup(["script", "style"]):
+            tag.extract()
+        return normalize_space(soup.get_text(separator=" "))
+    except Exception:
