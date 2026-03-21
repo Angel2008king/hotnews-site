@@ -1,7 +1,4 @@
-#!/usr/bin/env python3        t = re.sub(r"<script.*?>.*?</script>", "", raw, flags=re.S | re.I)
-        t = re.sub(r"<style.*?>.*?</style>", "", t, flags=re.S | re.I)
-        t = re.sub(r"<[^>]+>", "", t)
-        return normalize_space(t)
+#!/usr/bin/env python3(t)
 
 UA_INDEX = 0
 def _rotate_ua():
@@ -40,7 +37,7 @@ def fetch_rss(feed_url: str, source_name: str) -> List[Dict[str, Any]]:
     if not feedparser:
         return []
     d = feedparser.parse(feed_url)
-    items = []
+    items: List[Dict[str, Any]] = []
     for e in d.entries[:MAX_ITEMS_PER_SOURCE]:
         title = normalize_space(getattr(e, "title", ""))
         link = safe_url(getattr(e, "link", "") or getattr(e, "id", ""))
@@ -59,7 +56,7 @@ def fetch_rss(feed_url: str, source_name: str) -> List[Dict[str, Any]]:
 # ===================== 通用链接抓取 =====================
 def _parse_generic_links(html: str, domain_allow: Tuple[str, ...]) -> List[Dict[str, Any]]:
     soup = BeautifulSoup(html, "lxml")
-    out = []
+    out: List[Dict[str, Any]] = []
     for a in soup.select("a"):
         title = normalize_space(a.get_text())
         href = safe_url(a.get("href") or "")
@@ -279,7 +276,7 @@ def _parse_datetime_str(s: str) -> Optional[dt.datetime]:
     s = normalize_space(s)
 
     # 1) 2026-03-21 / 2026/03/21 [10:20[:30]]
-    m = re.search(r"(\d{4})\d{1,2}\d{1,2}(?:\d{1,2}:(\d{2})(?::(\d{2}))?)?", s)
+    m = re.search(r"(\d{4})\d{1,2}\d{1,2}(?:\s+(\d{1,2}):(\d{2})(?::(\d{2}))?)?", s)
     if m:
         y, mo, d = int(m.group(1)), int(m.group(2)), int(m.group(3))
         hh, mm, ss = int(m.group(4) or 0), int(m.group(5) or 0), int(m.group(6) or 0)
@@ -557,12 +554,12 @@ header .ts{color:#666;font-size:.9rem;margin-bottom:10px;text-align:center}
 .idx{display:inline-block;width:36px;color:#888}
 .title a{color:var(--link);text-decoration:none}
 .title a:hover{text-decoration:underline}
-.meta{color:var(--muted);font-size:.9rem;margin-top:4px}
+.meta{color:#666;font-size:.9rem;margin-top:4px}
 .sum{margin-top:6px}
-footer{color:var(--muted);font-size:.85rem;margin-top:28px}
+footer{color:#666;font-size:.85rem;margin-top:28px}
     """.strip()
 
-    # Quicklinks（标准 <a>）
+    # Quicklinks（标准 <a>）；如需完全隐藏，直接把 quicklinks_html 设为 ""，并删掉 head 里对应 3 行
     quicklinks = [
         ("https://wap.weather.com.cn/mweather/", "天气预报"),
         ("https://www.ip138.com/ditie/", "城市地铁"),
@@ -570,8 +567,8 @@ footer{color:var(--muted);font-size:.85rem;margin-top:28px}
         ("https://wap.baidu.com/", "百度"),
     ]
     quicklinks_html = "".join(
-        f'{htmllib.escape(href)}{htmllib.escape(text)}</a>'
-        for href, text in quicklinks
+        f'{htmllib.escape(h)}{htmllib.escape(t)}</a>'
+        for h, t in quicklinks
     )
 
     head = (
@@ -588,7 +585,7 @@ footer{color:var(--muted);font-size:.85rem;margin-top:28px}
         f'<div class="ts">生成时间：{now}</div>'
         '</header><section>'
     )
-    # 说明：这里已删除“排序/时间范围/国际优先”的说明行
+    # 已删除“排序/时间范围/国际优先”的说明行
 
     rows: List[str] = []
     for i, it in enumerate(items, 1):
@@ -796,10 +793,10 @@ if __name__ == "__main__":
 CN Hot News Ranker — fixed4（国际源增强 + UI 修复 + CI 兼容）
 
 - 聚合国内 + 国际新闻源（RSS + HTML 兜底），生成 index.html
-- 命中 “习近平/总书记/中共中央 …” 的标题/摘要/正文一律过滤
+- 标题/摘要/正文命中 “习近平/总书记/中共中央 …” 一律过滤
 - 保证前 N 条（默认 5 条）为国际热点
-- UI：标题以可点击文字呈现（不再裸露 URL）；删除“排序/时间范围/国际优先”行；Quicklinks 为标准 <a>
-- 兼容旧 CI：--no-txt / --no-docx 两个无效果参数
+- UI：标题以可点击文字呈现（不再裸露 URL）；取消“排序/时间范围/国际优先”行；Quicklinks 为标准 <a>
+- CI 兼容：--no-txt / --no-docx 两个参数保留但无副作用
 
 用法：
 python cn_hot_news_ranker3.py --html index.html --no-txt --no-docx --outdir .
@@ -856,6 +853,7 @@ INTERNATIONAL_KEYWORDS = [
     '加拿大','墨西哥','巴西','阿根廷','智利','秘鲁','哥伦比亚',
 ]
 
+# 来源权重（用于热度评分）
 SOURCE_WEIGHT = {
     "BBC 中文": 6, "路透中文": 6, "法广 RFI 中文": 6, "德国之声 中文": 5, "CNN World": 5,
     "央视网-新闻频道": 4, "央视网-国内新闻": 2, "新华网-首页": 1,
@@ -914,3 +912,6 @@ def strip_html(raw: str) -> str:
             tag.extract()
         return normalize_space(soup.get_text(separator=" "))
     except Exception:
+        t = re.sub(r"<script.*?>.*?</script>", "", raw, flags=re.S | re.I)
+        t = re.sub(r"<style.*?>.*?</style>", "", t, flags=re.S | re.I)
+        t = re.sub(r"<[^>]+>", "", t)
