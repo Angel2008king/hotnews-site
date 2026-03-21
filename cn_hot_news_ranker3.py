@@ -376,7 +376,7 @@ def _parse_datetime_str(s: str) -> Optional[dt.datetime]:
         except Exception: return None
     return None
 
-def _try_iso_or_rfc(s: str) -> Optional]:
+def _try_iso_or_rfc(s: str) -> Optional:
     s = normalize_space(s)
     try:
         d = parsedate_to_datetime(s)
