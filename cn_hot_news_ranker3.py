@@ -1,4 +1,61 @@
-#!/usr/bin/env python3
+#!/usr/bin/env python3    "锂电": 2, "芯片": 2, "文旅": 1, "免税": 1, "通行": 1, "航班": 1
+}
+CITY_KEYWORDS = ["广州","深圳","北京","上海","杭州","南京","天津","重庆","武汉","西安"]
+
+# —— 国际热点关键词（用于置顶规则）——
+INTERNATIONAL_KEYWORDS = [
+    '美国','英国','法国','德国','意大利','西班牙','欧盟','欧洲','俄罗斯','乌克兰','波兰','白俄罗斯','立陶宛','拉脱维亚','爱沙尼亚',
+    '中东','以色列','加沙','巴勒斯坦','黎巴嫩','叙利亚','伊拉克','伊朗','也门','霍尔木兹','红海','胡塞',
+    '阿联酋','沙特','卡塔尔','土耳其','埃及','约旦','阿曼','巴林',
+    '印度','巴基斯坦','孟加拉','斯里兰卡','尼泊尔',
+    '日本','韩国','朝鲜','菲律宾','越南','老挝','柬埔寨','泰国','马来西亚','新加坡','印尼','澳大利亚','新西兰',
+    '加拿大','墨西哥','巴西','阿根廷','智利','秘鲁','哥伦比亚',
+    '两会'  # 非国际，但保留占位；后续 local_block 排除
+]
+
+SOURCE_WEIGHT = {
+    "BBC 中文": 6, "路透中文": 6, "法广 RFI 中文": 6, "德国之声 中文": 5, "CNN World": 5,
+    "央视网-新闻频道": 4, "央视网-国内新闻": 2, "新华网-首页": 1,
+    "中新网-即时": 4, "中新网-要闻": 1, "中新网-国内": 2, "中新网-社会": 1,
+    "环球网-国内": 0, "网易新闻-国内": 1,
+    "南方都市报": 2, "财经网": 3, "凤凰网": 5, "搜狐新闻": 2,
+}
+
+UA_POOL = [
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0 Safari/537.36",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15",
+    "Mozilla/5.0 (X11; Ubuntu; Linux x86_64; rv:122.0) Gecko/20100101 Firefox/122.0",
+]
+
+def _default_outdir() -> str:
+    env = os.environ.get("HOTNEWS_OUTDIR")
+    if env: return env
+    home = os.path.expanduser("~")
+    return os.path.join(home, "Hot_Points")
+
+OUTPUT_DIR = _default_outdir()
+os.makedirs(OUTPUT_DIR, exist_ok=True)
+
+_session = requests.Session()
+_session.headers.update({"User-Agent": UA_POOL[0]})
+for key in ["HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy"]:
+    if key in os.environ:
+        _session.proxies = {
+            "http": os.environ.get("HTTP_PROXY") or os.environ.get("http_proxy"),
+            "https": os.environ.get("HTTPS_PROXY") or os.environ.get("https_proxy"),
+        }
+        break
+
+def set_proxy(proxy: Optional[str]):
+    _session.proxies = {"http": proxy, "https": proxy} if proxy else {}
+
+def normalize_space(s: Optional[str]) -> str:
+    return re.sub(r"\s+", " ", s or "").strip()
+
+def safe_url(u: str) -> str:
+    if not u: return u
+    u = u.replace(" ", "")
+    if u.startswith("//"): u = "https:" + u
     return u
 
 def strip_html(raw: str) -> str:
@@ -43,7 +100,7 @@ def get_html(url: str) -> str:
         time.sleep(delay); delay = min(delay*1.8, 6.0)
     raise RuntimeError(f"请求失败：{url} 错误：{last}")
 
-# ---------- RSS & HTML 解析 ----------
+# ---------- RSS & HTML 解析（沿用附件结构） ----------
 def fetch_rss(feed_url: str, source_name: str) -> List[Dict[str, Any]]:
     if not feedparser: return []
     d = feedparser.parse(feed_url)
@@ -89,7 +146,7 @@ def _extract_by_selectors(soup: BeautifulSoup, selectors: list, domain_allow: tu
         if len(out) >= limit: break
     return out
 
-# —— 附件中的国内站点解析（保持一致） ——
+# —— 国内站点解析（保持附件逻辑） ——
 def parse_cctv_index(html: str) -> list:
     soup = BeautifulSoup(html, 'lxml')
     selectors = ['.roll_yw a', '.newslist a', '.title_list a', 'section a']
@@ -114,7 +171,7 @@ def parse_net163_domestic(html: str) -> list:
     return _extract_by_selectors(soup, selectors, ('https://news.163.com/','https://www.163.com/'), MAX_ITEMS_PER_SOURCE) \
         or _parse_generic_links(html, ('https://news.163.com/','https://www.163.com/'))
 
-# —— 南方都市报（南方网·南都频道）专用解析（保留原逻辑，仅清理正则） ——
+# —— 南方都市报（南方网·南都频道）专用解析（仅清理正则写法） ——
 def parse_nandu(html: str) -> list:
     soup = BeautifulSoup(html, 'lxml'); items: List[Dict[str, Any]] = []
     for a in soup.select('a'):
@@ -179,7 +236,7 @@ def fetch_from_source(name: str, conf: Dict[str, str]) -> List[Dict[str, Any]]:
 def is_excluded_title_or_summary(title: str, summary: str = '') -> bool:
     return bool(EXCLUDE_REGEX.search(f"{title} {summary}"))
 
-# -------- 去重与合并（原样保留） --------
+# -------- 去重与合并（保持附件结构） --------
 def dedup_and_group(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     def canon_title(t: str) -> str:
         t = re.sub(r"[（(【\[\]^)）】]{1,30}", "", t)
@@ -221,7 +278,7 @@ def dedup_and_group(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
 # ===== 解析时间 =====
 def _parse_datetime_str(s: str) -> Optional[dt.datetime]:
     s = normalize_space(s)
-    m = re.search(r'(\d{4})[-/](\d{1,2})[-/](\d{1,2})(?:\s+(\d{1,2}):(\d{2})(?::(\d{2}))?)?', s)
+    m = re.search(r'(\d{4})\d{1,2}\d{1,2}(?:\s+(\d{1,2}):(\d{2})(?::(\d{2}))?)?', s)
     if m:
         y, mo, d = int(m.group(1)), int(m.group(2)), int(m.group(3))
         hh = int(m.group(4) or 0); mm = int(m.group(5) or 0); ss = int(m.group(6) or 0)
@@ -233,7 +290,6 @@ def _parse_datetime_str(s: str) -> Optional[dt.datetime]:
         hh = int(m.group(4) or 0); mm = int(m.group(5) or 0); ss = int(m.group(6) or 0)
         try: return dt.datetime(y, mo, d, hh, mm, ss, tzinfo=CN_TZ)
         except Exception: return None
-    # 兜底 YYYYMMDD
     m = re.search(r'(\d{4})(\d{2})(\d{2})', s)
     if m:
         try: return dt.datetime(int(m.group(1)), int(m.group(2)), int(m.group(3)), tzinfo=CN_TZ)
@@ -264,13 +320,10 @@ def fetch_page_summary_and_time(url: str):
     content_hit_excluded = False
     try:
         html = get_html(url)
-        # —— 全文过滤：满足“标题及文章内容中”要求
         full_text = strip_html(html)
         if EXCLUDE_REGEX.search(full_text):
             content_hit_excluded = True
-        # —— 时间解析
         pub_text, pub_parsed = extract_publish_time(html, url)
-        # —— 摘要
         soup = BeautifulSoup(html, 'lxml')
         for sel in ['meta[name="description"]','meta[name="Description"]','meta[property="og:description"]','meta[name="og:description"]']:
             tag = soup.select_one(sel)
@@ -285,7 +338,7 @@ def fetch_page_summary_and_time(url: str):
         pass
     return (summary, pub_text, pub_parsed, content_hit_excluded)
 
-def extract_publish_time(html: str
+def extract_publish_time(html: str, url: str):
     soup = BeautifulSoup(html, 'lxml')
     xw_meta = soup.find('meta', attrs={'name':'pubdate'}) or soup.find('meta', attrs={'name':'publishdate'})
     if xw_meta and xw_meta.get('content'):
@@ -384,7 +437,7 @@ def attach_summaries(items: List[Dict[str, Any]], max_age_days: int = 31, drop_n
 
         if drop_no_time and not it.get('published_parsed'): continue
 
-        # 年份 & 最大天数过滤（保留原逻辑）
+        # 年份 & 最大天数过滤
         y = None
         if it.get('published_parsed'):
             try: y = dt.datetime(*it['published_parsed'][:3]).year
@@ -528,7 +581,7 @@ footer{color:var(--muted);font-size:.85rem;margin-top:28px}
         summary = htmllib.escape(it.get('summary_final','') or it.get('summary','') or it['title'])
         rows.append(
             f"<article class='card'><div class='title'><span class='idx'>{i:02d}.</span>"
-            f"{url}{title}</a></div>"
+            f"<a href=\"{url}\" target=\"_blank\" rel=\"noopener\">{title}</a></div>"
             f"<div class='meta'>来源：{htmllib.escape(srcs)}；日期：{htmllib.escape(pub)}</div>"
             f"<div class='sum'>摘要：{summary}</div></article>"
         )
@@ -542,21 +595,11 @@ footer{color:var(--muted);font-size:.85rem;margin-top:28px}
 # ============== 数据源（在原有基础上追加国际源） ==============
 SOURCES: List[Tuple[str, Dict[str, str]]] = [
     # ===== 国际（新增） =====
-    ("BBC 中文", {
-        "rss": "https://www.bbc.co.uk/zhongwen/simp/index.xml",
-    }),
-    ("路透中文", {
-        "rss": "https://feedx.net/rss/reuters.xml"
-    }),
-    ("法广 RFI 中文", {
-        "rss": "https://feedx.net/rss/rfi.xml"
-    }),
-    ("德国之声 中文", {
-        "rss": "https://feedx.net/rss/dw.xml"
-    }),
-    ("CNN World", {  # 暂无稳定“CNN 中文”官方 RSS，用世界频道英文 RSS 代替
-        "rss": "http://rss.cnn.com/rss/cnn_world.rss"
-    }),
+    ("BBC 中文",    {"rss": "https://www.bbc.co.uk/zhongwen/simp/index.xml"}),
+    ("路透中文",    {"rss": "https://feedx.net/rss/reuters.xml"}),
+    ("法广 RFI 中文", {"rss": "https://feedx.net/rss/rfi.xml"}),
+    ("德国之声 中文", {"rss": "https://feedx.net/rss/dw.xml"}),
+    ("CNN World",  {"rss": "http://rss.cnn.com/rss/cnn_world.rss"}),
 
     # ===== 国内（与附件一致） =====
     ("中新网-即时", {"rss": "https://www.chinanews.com.cn/rss/scroll-news.xml"}),
@@ -650,12 +693,12 @@ CN Hot News Ranker — fixed3 (minimal changes on user's file)
 变更点（仅做最小增量）：
 1) 过滤词命中即丢弃（标题/摘要 + 正文全文均检查）：“习近平/总书记/中共中央/国家主席/中央委员会/中央政府/中央统战部/国家领导人”
 2) 保证前 N 条（默认 5）为国际热点：--intl-first（默认开启） + --top-intl（默认 5）
-3) 新增国际新闻源（RSS 为主，HTML 兜底同架构）：
+3) 新增国际新闻源（RSS 为主）：
    - BBC 中文（官方 RSS）
    - 路透中文（FeedX）
    - 法广 RFI 中文（FeedX）
    - 德国之声中文（FeedX）
-   - CNN World（官方 RSS，替代“CNN 中文”）
+   - CNN World（官方 RSS）
 其余函数/结构与附件保持一致。
 """
 
@@ -691,60 +734,4 @@ HOT_KEYWORDS = {
     "突发": 3, "通报": 2, "最新": 2, "预警": 2, "发布": 2, "春运": 1,
     "消费": 2, "房产": 1, "楼市": 2, "经济": 2, "事故": 3, "暴雪": 2,
     "寒潮": 1, "高铁": 2, "医保": 2, "大模型": 2, "AI": 3, "新能源": 2,
-    "锂电": 2, "芯片": 2, "文旅": 1, "免税": 1, "通行": 1, "航班": 1
 }
-CITY_KEYWORDS = ["广州","深圳","北京","上海","杭州","南京","天津","重庆","武汉","西安"]
-
-# —— 国际热点关键词（用于置顶规则）——
-INTERNATIONAL_KEYWORDS = [
-    '美国','英国','法国','德国','意大利','西班牙','欧盟','欧洲','俄罗斯','乌克兰','波兰','白俄罗斯','立陶宛','拉脱维亚','爱沙尼亚',
-    '中东','以色列','加沙','巴勒斯坦','黎巴嫩','叙利亚','伊拉克','伊朗','也门','霍尔木兹','红海','胡塞',
-    '阿联酋','沙特','卡塔尔','土耳其','埃及','约旦','阿曼','巴林',
-    '印度','巴基斯坦','孟加拉','斯里兰卡','尼泊尔',
-    '日本','韩国','朝鲜','菲律宾','越南','老挝','柬埔寨','泰国','马来西亚','新加坡','印尼','澳大利亚','新西兰',
-    '加拿大','墨西哥','巴西','阿根廷','智利','秘鲁','哥伦比亚',
-    '两会'  # 非国际，但保留占位；后续 local_block 排除
-]
-
-SOURCE_WEIGHT = {
-    "BBC 中文": 6, "路透中文": 6, "法广 RFI 中文": 6, "德国之声 中文": 5, "CNN World": 5,
-    "央视网-新闻频道": 4, "央视网-国内新闻": 2, "新华网-首页": 1,
-    "中新网-即时": 4, "中新网-要闻": 1, "中新网-国内": 2, "中新网-社会": 1,
-    "环球网-国内": 0, "网易新闻-国内": 1,
-    "南方都市报": 2, "财经网": 3, "凤凰网": 5, "搜狐新闻": 2,
-}
-
-UA_POOL = [
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0 Safari/537.36",
-    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15",
-    "Mozilla/5.0 (X11; Ubuntu; Linux x86_64; rv:122.0) Gecko/20100101 Firefox/122.0",
-]
-
-def _default_outdir() -> str:
-    env = os.environ.get("HOTNEWS_OUTDIR")
-    if env: return env
-    home = os.path.expanduser("~")
-    return os.path.join(home, "Hot_Points")
-
-OUTPUT_DIR = _default_outdir()
-os.makedirs(OUTPUT_DIR, exist_ok=True)
-
-_session = requests.Session()
-_session.headers.update({"User-Agent": UA_POOL[0]})
-for key in ["HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy"]:
-    if key in os.environ:
-        _session.proxies = {
-            "http": os.environ.get("HTTP_PROXY") or os.environ.get("http_proxy"),
-            "https": os.environ.get("HTTPS_PROXY") or os.environ.get("https_proxy"),
-        }
-        break
-
-def set_proxy(proxy: Optional[str]):
-    _session.proxies = {"http": proxy, "https": proxy} if proxy else {}
-
-def normalize_space(s: Optional[str]) -> str:
-    return re.sub(r"\s+", " ", s or "").strip()
-
-def safe_url(u: str) -> str:
-    if not u: return u
-    u = u.replace(" ", "")
