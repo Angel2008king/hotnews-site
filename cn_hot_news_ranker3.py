@@ -1,4 +1,9 @@
-#!/usr/bin/env python3s}")
+#!/usr/bin/env python3 = r.status_code
+            if 200 <= s < 300:
+                r.encoding = r.apparent_encoding or r.encoding or 'utf-8'
+                return r.text
+            elif s in (401, 403):
+                _rotate_ua(); last = Exception(f"Forbidden {s}")
             elif s in (404,):
                 raise RuntimeError(f"404 Not Found: {url}")
             elif s in (429,):
@@ -39,7 +44,7 @@ def _parse_generic_links(html: str, domain_allow: Tuple[str, ...]) -> List[Dict[
         if domain_allow and not any(href.startswith(d) or d in href for d in domain_allow): continue
         if 'javascript:' in href or '#' in href: continue
         if len(title) < 6: continue
-        out.append({'title': title, 'url': href});
+        out.append({'title': title, 'url': href})
         if len(out) >= MAX_ITEMS_PER_SOURCE: break
     return out
 
@@ -58,7 +63,7 @@ def _extract_by_selectors(soup: BeautifulSoup, selectors: list, domain_allow: tu
         if len(out) >= limit: break
     return out
 
-# CCTV/Xinhua/Huanqiu/163 —— 与 fixed2 一致
+# CCTV/Xinhua/NetEase —— 与 fixed2 一致
 def parse_cctv_index(html: str) -> list:
     soup = BeautifulSoup(html, 'lxml')
     selectors = ['.roll_yw a', '.newslist a', '.title_list a', 'section a']
@@ -109,12 +114,42 @@ def parse_nandu(html: str) -> list:
             if len(items) >= MAX_ITEMS_PER_SOURCE: break
     return items
 
+# —— 补齐以下解析器（SOURCES 已引用；实现保守，不改变整体结构） ——
+def parse_huanqiu_china(html: str) -> list:
+    soup = BeautifulSoup(html, 'lxml')
+    selectors = ['a[href*="china.huanqiu.com"]','a[href*="/article/"]','section a','.list a']
+    return _extract_by_selectors(soup, selectors, ('https://china.huanqiu.com/','https://www.huanqiu.com/'), MAX_ITEMS_PER_SOURCE) or \
+           _parse_generic_links(html, ('https://china.huanqiu.com/','https://www.huanqiu.com/'))
+
+def parse_caijing(html: str) -> list:
+    soup = BeautifulSoup(html, 'lxml')
+    selectors = ['.main a','.list a','section a','a[href*="/202"]']
+    return _extract_by_selectors(soup, selectors, ('https://finance.caijing.com.cn/','https://www.caijing.com.cn/'), MAX_ITEMS_PER_SOURCE) or \
+           _parse_generic_links(html, ('https://finance.caijing.com.cn/','https://www.caijing.com.cn/'))
+
+def parse_ifeng(html: str) -> list:
+    soup = BeautifulSoup(html, 'lxml')
+    selectors = ['.news-stream-newsStream-news-item a','.index_news_list a','section a','a[href*="/a/"]']
+    return _extract_by_selectors(soup, selectors, ('https://news.ifeng.com/','https://www.ifeng.com/'), MAX_ITEMS_PER_SOURCE) or \
+           _parse_generic_links(html, ('https://news.ifeng.com/','https://www.ifeng.com/'))
+
+def parse_sohu_news(html: str) -> list:
+    soup = BeautifulSoup(html, 'lxml')
+    selectors = ['.news-box a','.list16 a','section a','a[href*="/a/"]']
+    return _extract_by_selectors(soup, selectors, ('https://www.sohu.com/','https://news.sohu.com/'), MAX_ITEMS_PER_SOURCE) or \
+           _parse_generic_links(html, ('https://www.sohu.com/','https://news.sohu.com/'))
+
 PARSERS = {
     'parse_cctv_index': parse_cctv_index,
     'parse_cctv_china': parse_cctv_china,
     'parse_xinhua': parse_xinhua,
     'parse_net163_domestic': parse_net163_domestic,
     'parse_nandu': parse_nandu,
+    # —— 同步登记补齐的解析器 —— 
+    'parse_huanqiu_china': parse_huanqiu_china,
+    'parse_caijing': parse_caijing,
+    'parse_ifeng': parse_ifeng,
+    'parse_sohu_news': parse_sohu_news,
 }
 
 def fetch_from_source(name: str, conf: Dict[str, str]) -> List[Dict[str, Any]]:
@@ -140,6 +175,15 @@ def fetch_from_source(name: str, conf: Dict[str, str]) -> List[Dict[str, Any]]:
 
 def is_excluded(title: str, summary: str = '') -> bool:
     return bool(EXCLUDE_REGEX.search(f"{title} {summary}"))
+
+# >>> 修改点：新增“正文级过滤”的小工具函数（不改变原有函数签名/调用链）
+def page_contains_excluded(url: str) -> bool:
+    try:
+        html = get_html(url)
+        full_text = strip_html(html)
+        return bool(EXCLUDE_REGEX.search(full_text))
+    except Exception:
+        return False
 
 # -------- 去重与合并 --------
 def dedup_and_group(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -181,9 +225,9 @@ def dedup_and_group(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
 # ===== 解析时间 =====
 def _parse_datetime_str(s: str) -> Optional[dt.datetime]:
     s = normalize_space(s)
-    m = re.search(r'(\d{4})[-/](\d{1,2})[-/](\d{1,2})(?:\s+(\d{1,2}):(\d{2})(?::(\d{2}))?)?', s)
+    m = re.search(r'(\d{4})\d{1,2}\d{1,2}(?:\s+(\d{1,2}):(\d{2})(?::(\d{2}))?)?', s)
     if m:
-        y, mo, d = int(m.group(1)),(2)), int(m.group(3))
+        y, mo, d = int(m.group(1)), int(m.group(2)), int(m.group(3))
         hh = int(m.group(4) or 0); mm = int(m.group(5) or 0); ss = int(m.group(6) or 0)
         try: return dt.datetime(y, mo, d, hh, mm, ss, tzinfo=CN_TZ)
         except Exception: return None
@@ -266,7 +310,8 @@ def extract_publish_time(html: str, url: str):
             raw = normalize_space(cand); d = _parse_datetime_str(raw) or _try_iso_or_rfc(raw)
             if d: return (raw, d.timetuple())
     body = soup.get_text(separator=' ', strip=True)
-    m = re.search(r'(\d{4})年(\d{1,2})月(\d{1,2})日\s+(\d{1,2}):(\d{2})(?::(\d{2}))?', body) or re.search(r'(\d{4})\d{1,2}\d{1,2}\s+(\d{1,2}):(\d{2})(?::(\d{2}))?', body)
+    m = re.search(r'(\d{4})年(\d{1,2})月(\d{1,2})日\s+(\d{1,2}):(\d{2})(?::(\d{2}))?', body) or \
+        re.search(r'(\d{4})\d{1,2}\d{1,2}\s+(\d{1,2}):(\d{2})(?::(\d{2}))?', body)
     if m:
         raw = m.group(0); d = _parse_datetime_str(raw) or _try_iso_or_rfc(raw)
         if d: return (raw, d.timetuple())
@@ -279,20 +324,12 @@ def extract_publish_time(html: str, url: str):
             pass
     return (None, None)
 
-# ——（最小改动）在摘要阶段顺便做“正文全文过滤”——
 def fetch_page_summary_and_time(url: str):
     summary = ''
     pub_text = None; pub_parsed = None
-    content_hit_excluded = False
     try:
         html = get_html(url)
-        # 正文全文过滤
-        full_text = strip_html(html)
-        if EXCLUDE_REGEX.search(full_text):
-            content_hit_excluded = True
-        # 时间解析
         pub_text, pub_parsed = extract_publish_time(html, url)
-        # 摘要
         soup = BeautifulSoup(html, 'lxml')
         for sel in ['meta[name="description"]','meta[name="Description"]','meta[property="og:description"]','meta[name="og:description"]']:
             tag = soup.select_one(sel)
@@ -305,24 +342,29 @@ def fetch_page_summary_and_time(url: str):
                     summary = txt[:400]; break
     except Exception:
         pass
-    return (summary, pub_text, pub_parsed, content_hit_excluded)
+    return (summary, pub_text, pub_parsed)
 
 def attach_summaries(items: List[Dict[str, Any]], max_age_days: int = 31, drop_no_time: bool = False) -> None:
     now_year = dt.datetime.now(CN_TZ).year
     keep = []
     for it in items:
-        # 先做一次“标题/摘要”快速过滤（保持原逻辑）
-        if is_excluded(it.get('title',''), it.get('summary','')):
-            continue
+        # 原始快速摘要
         s = strip_html(it.get('summary','')) if it.get('summary') else ''
         pub_txt = it.get('published',''); pub_parsed = it.get('published_parsed')
-        s2, t2, p2, content_hit_excluded = fetch_page_summary_and_time(it['url'])
-        # —— 正文命中过滤词：丢弃 ——
-        if content_hit_excluded:
-            continue
+
+        s2, t2, p2 = fetch_page_summary_and_time(it['url'])
+
+        # >>> 修改点：正文命中过滤词则丢弃
+        try:
+            if page_contains_excluded(it['url']):
+                continue
+        except Exception:
+            pass
+
         if not s and s2: s = s2
         if p2: pub_txt = t2 or pub_txt; pub_parsed = p2
         it['summary_final'] = (s or it['title'])[:160]
+
         if pub_parsed: it['published_parsed'] = pub_parsed
         if pub_parsed and not pub_txt:
             try:
@@ -332,7 +374,9 @@ def attach_summaries(items: List[Dict[str, Any]], max_age_days: int = 31, drop_n
                 pub_txt = dval.strftime('%Y-%m-%d %H:%M')
             except Exception: pass
         if pub_txt: it['published'] = pub_txt
+
         if drop_no_time and not it.get('published_parsed'): continue
+
         y = None
         if it.get('published_parsed'):
             try: y = dt.datetime(*it['published_parsed'][:3]).year
@@ -341,6 +385,7 @@ def attach_summaries(items: List[Dict[str, Any]], max_age_days: int = 31, drop_n
             m = re.search(r'(\d{4})', it.get('url',''))
             y = int(m.group(1)) if m else None
         if y and y < now_year - 2: continue
+
         if it.get('published_parsed') and max_age_days and max_age_days > 0:
             try:
                 pub_dt = dt.datetime(*it['published_parsed'][:6])
@@ -397,8 +442,9 @@ def order_by_time_desc(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
 def rank_items(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     return sorted(items, key=score_item, reverse=True)
 
-# —— 国际热点识别（来源白名单优先，其次关键词） ——
+# —— 国际热点置顶：基于关键词库 + 来源白名单 —— 
 def is_international(it: Dict[str, Any]) -> bool:
+    # >>> 修改点：来源白名单优先判定
     srcs = set(it.get('sources',[]) or [it.get('source','')])
     if any(s in INTERNATIONAL_SOURCES for s in srcs):
         return True
@@ -407,14 +453,17 @@ def is_international(it: Dict[str, Any]) -> bool:
     local_block = any(k in txt for k in ['中国','全国','广东','广州','深圳','珠三角'])
     return bool(intl_hit and not local_block)
 
-# —— 新增：保证前 top_k 条为国际热点（不足则尽量置顶）
-def intl_first_merge_with_topk(base_sorted: List[Dict[str, Any]], top_k: int = 5) -> List[Dict[str, Any]]:
+def intl_first_merge(items: List[Dict[str, Any]], base_sorted: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """
+    >>> 修改点：保持函数名/入参不变，但保证前 5 条为国际热点（不足则尽量置顶）。
+    """
     intl = [it for it in base_sorted if is_international(it)]
     other = [it for it in base_sorted if not is_international(it)]
-    head = intl[:top_k]
-    if len(head) < top_k:
-        print(f"[提示] 国际热点仅 {len(head)} 条，未达到指定的 {top_k} 条，将尽量置顶。")
-    return head + intl[top_k:] + other
+    TOP_K = 5
+    head = intl[:TOP_K]
+    if len(head) < TOP_K:
+        print(f"[提示] 国际热点仅 {len(head)} 条，未达到指定的 {TOP_K} 条，将尽量置顶。")
+    return head + intl[TOP_K:] + other
 
 def fmt_pub_time(it):
     if it.get('published_parsed'):
@@ -485,16 +534,16 @@ footer{color:var(--muted);font-size:.85rem;margin-top:28px}
     with open(out_fullpath, 'w', encoding='utf-8') as f:
         f.write(head + "".join(rows) + tail)
 
-# 数据源（新增 5 个国际 RSS；其它来源保持不变）
+# 数据源（**已移除 澎湃新闻**）。——>>> 修改点：在最前面新增 5 个国际 RSS
 SOURCES: List[Tuple[str, Dict[str, str]]] = [
-    # ===== 国际新闻（新增） =====
-    ("BBC 中文", {"rss": "https://feedx.net/rss/bbc.xml"}),           # FeedX 聚合
-    ("路透中文", {"rss": "https://feedx.net/rss/reuters.xml"}),       # FeedX 聚合
-    ("法广中文", {"rss": "https://feeds.feedburner.com/rfi/cn"}),     # 官方 feedburner
-    ("德国之声", {"rss": "https://feedx.net/rss/dw.xml"}),            # FeedX 聚合（中文频道）
-    ("CNN 国际", {"rss": "http://rss.cnn.com/rss/cnn_world.rss"}),     # CNN 官方 World RSS（无 CNN 中文官方 RSS）
+    # ===== 国际新闻（新增；其它来源及顺序保持不变） =====
+    ("BBC 中文",   {"rss": "https://feedx.net/rss/bbc.xml"}),
+    ("路透中文",   {"rss": "https://feedx.net/rss/reuters.xml"}),
+    ("法广中文",   {"rss": "https://feeds.feedburner.com/rfi/cn"}),
+    ("德国之声",   {"rss": "https://feedx.net/rss/dw.xml"}),
+    ("CNN 中文",   {"rss": "http://rss.cnn.com/rss/cnn_world.rss"}),
 
-    # ===== 国内新闻（原有，保持不变） =====
+    # ===== 国内新闻（原有） =====
     ("中新网-即时", {"rss": "https://www.chinanews.com.cn/rss/scroll-news.xml"}),
     ("中新网-要闻", {"rss": "https://www.chinanews.com.cn/rss/importnews.xml"}),
     ("中新网-国内", {"rss": "https://www.chinanews.com.cn/rss/china.xml"}),
@@ -552,7 +601,8 @@ def main():
     base_sorted = order_by_time_desc(merged) if args.order == 'time' else rank_items(merged)
 
     if args.intl_first:
-        ordered = intl_first_merge_with_topk(base_sorted, top_k=5)  # <<— 保证前5条为国际热点
+        # >>> 修改点：保证前 5 条国际热点
+        ordered = intl_first_merge(merged, base_sorted)
     else:
         ordered = base_sorted
 
@@ -575,12 +625,12 @@ if __name__ == '__main__':
 # -*- coding: utf-8 -*-
 """
 CN Hot News Ranker — fixed3
-需求变更（在原结构上做最小增量）：
-1) 标题 + 正文 如出现【习近平 / 总书记 / 中共中央】即过滤；
-2) 前 5 条保证为国际热点（不足 5 条则尽量置顶）；
-3) 补充国际新闻源（BBC 中文 / 路透中文 / 法广中文 / 德国之声 / CNN 国际）。
-其它流程、结构与样式不变。
+需求变更：
+1) **彻底移除 澎湃新闻** 来源；
+2) **国际热点置顶显示**：新增 --intl-first（默认开启），将国际热点（按关键词/地名/地区库识别）优先显示；
+3) 继承 fixed2 的：--order（默认 time）、--max-age-days（默认31）、--drop-no-time、南都专用解析等。
 """
+
 import os, re, time, argparse, html as htmllib, json
 import datetime as dt
 from email.utils import parsedate_to_datetime
@@ -600,11 +650,11 @@ SLEEP_BETWEEN = 0.5
 TIMEOUT = 10
 RETRY = 3
 
-# —— 仅保留用户指定的 3 个过滤词（标题 + 正文 均生效）——
+# >>> 修改点：仅保留三词，并用于标题与正文的统一过滤
 EXCLUDE_KEYWORDS = [
     "习近平", "总书记", "中共中央"
 ]
-EXCLUDE_REGEX = re.compile("(" + "|".join(map(re.escape, EXCLUDE_KEYWORDS)) + ")", re.IGNORECASE)
+EXCLUDE_REGEX = re.compile("|".join(map(re.escape, EXCLUDE_KEYWORDS)), re.IGNORECASE)
 
 HOT_KEYWORDS = {
     "突发": 3, "通报": 2, "最新": 2, "预警": 2, "发布": 2, "春运": 1,
@@ -614,7 +664,7 @@ HOT_KEYWORDS = {
 }
 CITY_KEYWORDS = ["广州","深圳","北京","上海","杭州","南京","天津","重庆","武汉","西安"]
 
-# ——国际热点关键词（用于辅助识别）——
+# ——国际热点关键词（用于置顶规则）——
 INTERNATIONAL_KEYWORDS = [
     # 地区/国家
     '美国','英国','法国','德国','意大利','西班牙','欧盟','欧洲','俄罗斯','乌克兰','波兰','白俄罗斯','立陶宛','拉脱维亚','爱沙尼亚',
@@ -623,13 +673,11 @@ INTERNATIONAL_KEYWORDS = [
     '印度','巴基斯坦','孟加拉','斯里兰卡','尼泊尔',
     '日本','韩国','朝鲜','菲律宾','越南','老挝','柬埔寨','泰国','马来西亚','新加坡','印尼','澳大利亚','新西兰',
     '加拿大','墨西哥','巴西','阿根廷','智利','秘鲁','哥伦比亚',
-    # 话题词（此处仅辅助，不单独当作国际）
-    '北约','霍尔木兹','红海','中东'
 ]
 
-# ——国际来源白名单（这些源来的新闻一律视为“国际”）——
+# >>> 修改点：新增“国际来源白名单”，这些来源来的条目直接视作国际热点
 INTERNATIONAL_SOURCES = {
-    "BBC 中文", "路透中文", "法广中文", "德国之声", "CNN 国际"
+    "BBC 中文", "路透中文", "法广中文", "德国之声", "CNN 中文"
 }
 
 SOURCE_WEIGHT = {
@@ -698,8 +746,3 @@ def get_html(url: str) -> str:
     for _ in range(RETRY + 1):
         try:
             r = _session.get(url, timeout=TIMEOUT, allow_redirects=True)
-            s = r.status_code
-            if 200 <= s < 300:
-                r.encoding = r.apparent_encoding or r.encoding or 'utf-8'
-                return r.text
-            elif s in (401,403):
